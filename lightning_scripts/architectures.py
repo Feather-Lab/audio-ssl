@@ -23,15 +23,15 @@ class SSLAudioModel(nn.Module):
             layers.append(nn.ReLU())
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
-
-        self.lin_cls = nn.Linear(proj_out_dim, n_classes)
+        if supervised:
+            self.lin_cls = nn.Linear(proj_out_dim, n_classes)
 
     def forward(self, x):
         x_ = self.f(x)
         feature = torch.flatten(x_, start_dim=1)
         out = self.g(feature)
         if not self.supervised:
-            logits = self.lin_cls(feature.detach()) 
+            return feature, out, None 
         else:
             logits = self.lin_cls(feature)
         return feature, out, logits

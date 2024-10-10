@@ -1,18 +1,18 @@
 
 import torch
 from torch import nn
-import torchvision
+# import torchvision
 import torch.nn.functional as F
 import lightning as L
 
-from . import architectures
-from .metrics import calculate_accuracy
-from .loss_functions import MMCR_Loss as Dual_MMCR_Loss
+import architectures
+from metrics import calculate_accuracy
+from loss_functions import MMCR_Loss as Dual_MMCR_Loss
 import audio_ssl.losses as ssl_losses 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
-from pprint import pprint
+# from pprint import pprint
 # from composer.optim.scheduler import CosineAnnealingWithWarmupScheduler
 
 import robustness.audio_functions.audio_transforms as at 
@@ -70,6 +70,8 @@ class LitAudioSSL(L.LightningModule):
             self.ssl_loss = Dual_MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
         else:
             self.ssl_loss = ssl_losses.__dict__[self.config['hparas']['ssl_loss']](**self.config['hparas']['ssl_loss_kwargs'], distributed=distributed)
+            # crop batch size for  data loader  by 2 for single-task ssl models 
+            self.config['hparas']['batch_size'] =  int(self.config['hparas']['batch_size'] // 2 )
         self.ssl_loss_str = self.config['hparas']['ssl_loss_str'] # str for logs 
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
@@ -96,14 +98,18 @@ class LitAudioSSL(L.LightningModule):
         else:
             if self.ssl_task == 'word':
                 # group word pairs as augmentations
+                # stack 11 and 12 as augmentations along dim 1 
                 outs_1 =  torch.stack([out_11, out_12], dim=1)
+                # stack 21 and 22 as augmentations along dim 1 
                 outs_2 =  torch.stack([out_21, out_22], dim=1)
-                # stack 1x and 2x along batch dimensions 
+                # concat 1x and 2x along batch dim -> b x n_aug x feats 
                 outs = torch.cat([outs_1, outs_2])
 
             elif self.ssl_task == 'audioset':
                 # group audioset pairs as augmentations
+                # stack 11 and 21 as augmentations along dim 1 
                 outs_1 =  torch.stack([out_11, out_21], dim=1)
+                # stack 12 and 22 as augmentations along dim 1 
                 outs_2 =  torch.stack([out_12, out_22], dim=1)
                 # stack x1 and x2 along batch dimensions 
                 outs = torch.cat([outs_1, outs_2])
@@ -121,19 +127,20 @@ class LitAudioSSL(L.LightningModule):
             class_loss_22 = self.class_loss(logits_22, labels_2)
             class_loss = class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22
             class_loss = class_loss / 4.0
+
+            # calc acc 
+            acc = 0 
+            acc += calculate_accuracy(logits_11, labels_1).item()
+            acc += calculate_accuracy(logits_12, labels_1).item()
+            acc += calculate_accuracy(logits_21, labels_2).item()
+            acc += calculate_accuracy(logits_22, labels_2).item()
+            acc /= 4.0  
+
+            self.log(f"{step_type}_class_acc", acc, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
             self.log(f"{step_type}_class_loss", class_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
         total_loss = self.lambda_ssl * loss_ssl + class_loss
         self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-
-        # calc acc 
-        acc = 0 
-        acc += calculate_accuracy(logits_11, labels_1).item()
-        acc += calculate_accuracy(logits_12, labels_1).item()
-        acc += calculate_accuracy(logits_21, labels_2).item()
-        acc += calculate_accuracy(logits_22, labels_2).item()
-        acc /= 4.0  
-        self.log(f"{step_type}_class_acc", acc, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
 
         # add acc to log 
@@ -194,7 +201,39 @@ class LitAudioSSL(L.LightningModule):
             outs = self(inputs) # self is self.forward, and is same as self.model.forward 
         """
         return self.model(x)
+    
+    # def collate_fn(self, batch):
+    #     """
+    #     Logic for generating views of speech and noise egs. 
+    #     """
+    #     batch = batch[0] # unbox wrapper added by dataloader 
+    #     signal_11, signal_12, signal_21, signal_22 = [], [], [], []
+    #     target_1 = batch[-2] # labels already collated 
+    #     target_2 = batch[-1] # labels already collated 
+    #     # convert labels to torch tensors 
+    #     if isinstance(target_1, dict):
+    #         for task_key, task_labels in target_1.items():
+    #             target_1[task_key] = torch.from_numpy(task_labels)
+    #     if isinstance(target_2, dict):
+    #         for task_key, task_labels in target_2.items():
+    #             target_2[task_key] = torch.from_numpy(task_labels)
+    #     else:
+    #         target_1 = torch.from_numpy(target_1) 
+    #         target_2 = torch.from_numpy(target_2) 
+    #     # convert signal and noise into signal
+    #     for (signal_1, signal_2, noise_1, noise_2) in  zip(*batch[:4]):
+    #         signal_11.append(self.transforms(signal_1, noise_1)[0])
+    #         signal_12.append(self.transforms(signal_1, noise_2)[0])
+    #         signal_21.append(self.transforms(signal_2, noise_1)[0])
+    #         signal_22.append(self.transforms(signal_2, noise_2)[0])
 
+    #     signal_11 = torch.cat(signal_11).unsqueeze(1) # add back channel dim
+    #     signal_12 = torch.cat(signal_12).unsqueeze(1) # add back channel dim
+    #     signal_21 = torch.cat(signal_21).unsqueeze(1) # add back channel dim
+    #     signal_22 = torch.cat(signal_22).unsqueeze(1) # add back channel dim
+
+    #     return signal_11, signal_12, signal_21, signal_22, target_1, target_2
+    
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
         dataset = jsinV3_precombined_paired(root=self.config['data']['root'],

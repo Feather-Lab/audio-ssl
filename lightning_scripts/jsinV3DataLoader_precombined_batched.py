@@ -70,7 +70,7 @@ class jsinV3_precombined(torch.utils.data.ConcatDataset):
         class_map = word_and_speaker_encodings['word_idx_to_word']
         return class_map
 
-class jsinV3_precombined_paired(torch.utils.data.ConcatDataset):
+class jsinV3_precombined_paired_batched(torch.utils.data.ConcatDataset):
     # Makes a dataset using pre-paired speech and audioset background sounds
     # Works with hdf5 files for the jsinv3 dataset. 
     hdf5_glob = 'JSIN_all__run_*.h5'
@@ -91,7 +91,7 @@ class jsinV3_precombined_paired(torch.utils.data.ConcatDataset):
             else:
                 self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)[0:eval_max]
 
-        self.datasets = [H5DatasetPaired(h5_file, transform, self.target_keys, batch_size) for h5_file in self.all_hdf5_files]
+        self.datasets = [H5DatasetPairedBatched(h5_file, transform, self.target_keys, batch_size) for h5_file in self.all_hdf5_files]
 
         super().__init__(self.datasets)
         self.rotate_index = 0
@@ -183,10 +183,10 @@ class H5Dataset(torch.utils.data.Dataset):
         return self.dataset_len
 
 
-class H5DatasetPaired(torch.utils.data.Dataset):
+class H5DatasetPairedBatched(torch.utils.data.Dataset):
     def __init__(self, path, transform, target_keys, batch_size):
         """
-        Builds a pytorch hdf5 dataset
+        Builds a pytorch hdf5 dataset. Returns signal1, signal2, noise1, noise2, label1, label2
         Args:
             path (str): location of the hdf5 dataset
         """
@@ -236,12 +236,6 @@ class H5DatasetPaired(torch.utils.data.Dataset):
 
 
         # Before transforms, set the signal and the noise 
-        # signal_1 = self.dataset['sources']['signal']['signal'][index]
-        # noise_1 = self.dataset['sources']['noise']['signal'][index]
-
-        # signal_2 = self.dataset['sources']['signal']['signal'][(index + 1) % self.dataset_len]
-        # noise_2 = self.dataset['sources']['noise']['signal'][(index + 1) % self.dataset_len]
-
         signal_1 = self.dataset['sources']['signal']['signal'][self.split_1[start:end]]
         noise_1 = self.dataset['sources']['noise']['signal'][self.split_1[start:end]]
 
@@ -254,25 +248,6 @@ class H5DatasetPaired(torch.utils.data.Dataset):
             signal_2 = signal_1
             noise_2 = noise_1
 
-        # Transforms will take in the signal and the noise source for this dataset
-        # If no transform, just return the speech with no background
-        signal_11, signal_12, signal_21, signal_22 = [], [], [], []
-        if self.transform is not None:
-            for ix in range(self.batch_size):
-                signal_11_i, noise = self.transform(signal_1[ix], noise_1[ix])
-                signal_12_i, noise = self.transform(signal_1[ix], noise_2[ix])
-                signal_21_i, noise = self.transform(signal_2[ix], noise_1[ix])
-                signal_22_i, noise = self.transform(signal_2[ix], noise_2[ix])
-                signal_11.append(signal_11_i)
-                signal_12.append(signal_12_i)
-                signal_21.append(signal_21_i)
-                signal_22.append(signal_22_i)
-
-        signal_11 = torch.cat(signal_11, dim=0)
-        signal_12 = torch.cat(signal_12, dim=0)
-        signal_21 = torch.cat(signal_21, dim=0)
-        signal_22 = torch.cat(signal_22, dim=0)
-
         if len(self.target_keys) == 1:
             target_paths = self.target_keys[0].split('/')
             target_1 = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_1[start:end]]
@@ -283,6 +258,7 @@ class H5DatasetPaired(torch.utils.data.Dataset):
             if self.target_keys[0] == 'noise/labels_binary_via_int':
                 target_1 = target_1.astype(np.float32)
                 target_2 = target_2.astype(np.float32)
+                
         # If there are multiple keys, our target has them explicitly listed
         else:
             target_1, target_2 = {}, {}
@@ -297,7 +273,7 @@ class H5DatasetPaired(torch.utils.data.Dataset):
                     target_1[target_key] = target_1[target_key].astype(np.float32)
                     target_2[target_key] = target_2[target_key].astype(np.float32)
 
-        return signal_11, signal_12, signal_21, signal_22, target_1, target_2
+        return signal_1, signal_2, noise_1, noise_2, target_1, target_2
 
     def __len__(self):
         return self.dataset_len // 2

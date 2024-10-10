@@ -228,6 +228,16 @@ class H5DatasetPaired(torch.utils.data.Dataset):
             signal_2 = signal_1
             noise_2 = noise_1
 
+        # catch if signal 2 is noise/invalid
+        if signal_1.sum() == 0:
+            # grab another ex
+            signal_1 = self.dataset['sources']['signal']['signal'][self.split_1[index-1]]
+        # catch if signal 2 is noise/invalid
+        if signal_2.sum() == 0:
+            # grab another ex
+            signal_2 = self.dataset['sources']['signal']['signal'][self.split_2[index-1]]
+
+
         # Transforms will take in the signal and the noise source for this dataset
         # If no transform, just return the speech with no background
         if self.transform is not None:
@@ -235,6 +245,16 @@ class H5DatasetPaired(torch.utils.data.Dataset):
             signal_12, noise = self.transform(signal_1, noise_2)
             signal_21, noise = self.transform(signal_2, noise_1)
             signal_22, noise = self.transform(signal_2, noise_2)
+            if signal_11 == None:
+                print(f"Signal 11 is none on ix {index}")
+            if signal_12 == None:
+                print(f"Signal 12 is none on ix {index}")
+            if signal_21 == None:
+                print(f"Signal 21 is none on ix {index}")
+                print(f"Signal 2 sum: {signal_2.sum()} {signal_2=}, ")
+                print(f"Noise 1 sum: {noise_1.sum()} {noise_1=}")
+            if signal_22 == None:
+                print(f"Signal 22 is none on ix {index}")
         if len(self.target_keys) == 1:
             target_paths = self.target_keys[0].split('/')
             target_1 = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_1[index]]
@@ -259,6 +279,9 @@ class H5DatasetPaired(torch.utils.data.Dataset):
                     target_1[target_key] = target_1[target_key].astype(np.float32)
                     target_2[target_key] = target_2[target_key].astype(np.float32)
 
+        # for item_ in [signal_11, signal_12, signal_21, signal_22, target_1, target_2]:
+        #     if item_ is None:
+        #         print(f"None on index {index}")
         return signal_11, signal_12, signal_21, signal_22, target_1, target_2
 
     def __len__(self):
