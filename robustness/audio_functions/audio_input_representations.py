@@ -5,7 +5,7 @@
 # Feather et al. 2022 used cochleagram representations, however parameters
 # for a mel-spectrogram representation are also provided. 
 import sys
-sys.path.append('/om/user/jfeather/python-packages/chcochleagram')
+# sys.path.append('/om/user/jfeather/python-packages/chcochleagram')
 import chcochleagram
 
 log_mel_spec_0 = {'rep_type': 'mel_spec',

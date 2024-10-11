@@ -4,6 +4,9 @@ import math
 
 
 # modified from: https://github.com/facebookresearch/barlowtwins/blob/main/main.py
+
+# closure copied from: https://github.com/SeanNaren/lightning-barlowtwins/blob/master/optimizer.py
+
 class LARS(optim.Optimizer):
     def __init__(
         self,
@@ -41,7 +44,12 @@ class LARS(optim.Optimizer):
         return p.ndim == 1
 
     @torch.no_grad()
-    def step(self):
+    def step(self, closure=None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+        
         for g in self.param_groups:
             for p in g["params"]:
                 dp = p.grad
@@ -72,3 +80,44 @@ class LARS(optim.Optimizer):
                 mu.mul_(g["momentum"]).add_(dp)
 
                 p.add_(mu, alpha=-g["lr"])
+        return loss
+
+
+# Copyright (c) SeanNaren, Facebook, Inc. and its affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the license found in the
+# LICENSE file in the root directory of this source tree.
+
+# copied from: https://github.com/SeanNaren/lightning-barlowtwins/blob/master/optimizer.py
+
+class CosineWarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(
+            self,
+            optimizer: torch.optim.Optimizer,
+            max_steps: int,
+            warmup_steps: int,
+            lr: float,
+            batch_size: int,
+            last_epoch: int = -1,
+            verbose: bool = False,
+    ):
+        self.max_steps = max_steps
+        self.warmup_steps = warmup_steps
+        self.batch_size = batch_size
+        self.lr = lr
+        super().__init__(optimizer, last_epoch, verbose)
+
+    def get_lr(self):
+        step = self.last_epoch
+        max_steps = self.max_steps
+        base_lr = self.lr * self.batch_size / 256
+        if step < self.warmup_steps:
+            lr = base_lr * step / self.warmup_steps
+        else:
+            step -= self.warmup_steps
+            max_steps -= self.warmup_steps
+            q = 0.5 * (1 + math.cos(math.pi * step / max_steps))
+            end_lr = base_lr * 0.001
+            lr = base_lr * q + end_lr * (1 - q)
+        return [lr]

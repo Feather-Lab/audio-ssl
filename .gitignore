@@ -1,2 +1,44 @@
 *__pycache__*
 *.egg*
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# data and log directory
+outLogs
+lightning_logs/
+esc_analysis
+
+# data
+*.npy
+*.npz
+*.pkl
+*.pdpkl
+*.json
+*.csv
+*.wav
+*.pckl
+*.tar
+*.txt
+*.ckpt
+*.png
+*.svg
+*.pdf
+*.h5
+.hparams.yaml

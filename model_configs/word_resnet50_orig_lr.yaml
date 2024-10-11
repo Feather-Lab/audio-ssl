@@ -1,0 +1,34 @@
+data:
+  root: '/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/'
+  target_keys: ['signal/word_int']
+
+audio_rep:                                  # Attributes of audio feature
+  name: 'cochleagram_1'
+  on_gpu: True
+
+audio_transforms:
+  low_snr: -10
+  high_snr: 10
+  dbspl: 60
+
+val_metric:
+    word_task: 'val_signal/word_int_acc'
+
+hparas:                                   # Experiment hyper-parameters
+  epochs: 10                              # Each "epoch" is 25 passes through the speech dataset
+  batch_size: 768
+  step_lr: 2                              # Note: this is 50 pases through the speech dataset due to the structure of the hdf5 files
+  optimizer: "AdamW"
+  lr: 0.1                                 # initial LR 
+  valid_step: 5000
+  task_loss_params:
+    signal/word_int:
+      loss_type: 'crossentropyloss'
+      weight: 1.0
+
+model:                                    # Model architecture
+  arch_name: "resnet_multi_task50"
+  arch_params:
+    num_classes:
+      signal/word_int: 794
+    pretrained: False

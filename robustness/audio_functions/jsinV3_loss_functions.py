@@ -40,7 +40,7 @@ class jsinV3_multi_task_loss(ch.nn.Module):
     def set_batch_size(self, batch_size):
         self.batch_size = batch_size
     
-    def forward(self, output, target):
+    def forward(self, output, target, return_indiv_loss=False):
         """
         Computes the loss given the model output and the target
 
@@ -49,8 +49,12 @@ class jsinV3_multi_task_loss(ch.nn.Module):
                 self.tasks
             target (dict): element from the torch dataset containing the target values. 
                 Keys should match with self.tasks
+            return_indiv_loss (bool): flag to determine if individual tasks losses are 
+                also returned.
         Returns: 
             loss (ch.tensor): loss
+            task_loss_dict (dict): If return_indiv_loss, dict of loss for each task.
+                Keys should match with self.tasks 
         """
         if self.reduction=='none':
             # We want to reduce across the task -- important for multitask classification
@@ -63,5 +67,8 @@ class jsinV3_multi_task_loss(ch.nn.Module):
             loss_list = [self.all_loss_weights[task] * self.all_loss_functions[task](
                          output[task], target[task]) for task in self.tasks]
             loss = ch.stack(loss_list).sum(dim=0)
+        if return_indiv_loss:
+            task_loss_dict = {task:loss for task,loss in zip(self.tasks,loss_list)}
+            return loss, task_loss_dict
         return loss
         
