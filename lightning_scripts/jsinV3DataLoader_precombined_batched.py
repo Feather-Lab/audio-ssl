@@ -96,10 +96,10 @@ class jsinV3_precombined_paired_batched(torch.utils.data.ConcatDataset):
         super().__init__(self.datasets)
         self.rotate_index = 0
 
-    def _rotate_splits(self):
-        for dataset in self.datasets:
-            dataset._rotate_splits()
-        self.rotate_index += 1 
+    # def _rotate_splits(self):
+    #     for dataset in self.datasets:
+    #         dataset._rotate_splits()
+    #     self.rotate_index += 1 
 
     def class_map(self):
         """
@@ -206,16 +206,17 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         if self.dataset_len % 2 == 1:
             self.dataset_len -= 1
 
-        self.rotate_index = 0
+        # self.rotate_index = 0
         all_indices = list(range(self.dataset_len))
         self.split_1 = all_indices[::2]
         self.split_2 = all_indices[1::2]
         # scale dataset len after setting split indices 
         self.dataset_len = self.dataset_len // self.batch_size  # scale by batch size for dataloader (accessed in len method)
 
-    def _rotate_splits(self):
-        self.split_2 = self.split_2[1:] + self.split_2[:1]
-        self.rotate_index += 1
+    # def _rotate_splits(self):
+    #     self.split_2 = self.split_2[1:] + self.split_2[:1]
+    #     self.rotate_index += 1
+
 
     def __getitem__(self, index):
         """
@@ -227,6 +228,9 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
               which may combine the foreground and background speech, and the target idx
               specified by target_keys. 
         """
+
+        #TODO: Re-write to shuffle within mini-batch 
+        # logic -> grab batch, shuffle, every 2 are paired
         if self.dataset is None:
             self.dataset = h5py.File(self.file_path, 'r', swmr=True)# ["ndarray_data"]["signal"]
       
@@ -234,27 +238,23 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         start = index * self.batch_size
         end = start + self.batch_size
 
+        # get indices from start to end for signal and noise
+        signals = self.dataset['sources']['signal']['signal'][start:end]
+        noises = self.dataset['sources']['noise']['signal'][start:end]
 
-        # Before transforms, set the signal and the noise 
-        signal_1 = self.dataset['sources']['signal']['signal'][self.split_1[start:end]]
-        noise_1 = self.dataset['sources']['noise']['signal'][self.split_1[start:end]]
-
-        try:
-            signal_2 = self.dataset['sources']['signal']['signal'][self.split_2[start:end]]
-            noise_2 = self.dataset['sources']['noise']['signal'][self.split_2[start:end]]
-        except IndexError:
-            print(self.split_2[start:end])
-            print(start, end)
-            signal_2 = signal_1
-            noise_2 = noise_1
+        # get random permutation of batch ixs assign signals to view 1 and 2. Will take second half of ixs as signal_2x 
+        permuted_batch_ixs = torch.randperm(self.batch_size)
+        split_1, split_2 = torch.chunk(permuted_batch_ixs, 2)
+        signal_1 = signals[split_1]
+        signal_2 = signals[split_2]
+        noise_1 = noises[split_1]
+        noise_2 = noises[split_2]
 
         if len(self.target_keys) == 1:
             target_paths = self.target_keys[0].split('/')
-            target_1 = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_1[start:end]]
-            try:
-                target_2 = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_2[start:end]]
-            except IndexError:
-                target_2 = target_1
+            targets = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
+            target_1 = targets[split_1]
+            target_2 = targets[split_2]
             if self.target_keys[0] == 'noise/labels_binary_via_int':
                 target_1 = target_1.astype(np.float32)
                 target_2 = target_2.astype(np.float32)
@@ -264,11 +264,9 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
             target_1, target_2 = {}, {}
             for target_key in self.target_keys:
                 target_paths = target_key.split('/')
-                target_1[target_key] = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_1[start:end]]
-                try:
-                    target_2[target_key] = self.dataset['sources'][target_paths[0]][target_paths[1]][self.split_2[start:end]]
-                except IndexError:
-                    target_2[target_key] = target_1[target_key]
+                targets = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
+                target_1[target_key] = targets[split_1]
+                target_2[target_key] = targets[split_2]
                 if target_key == 'noise/labels_binary_via_int':
                     target_1[target_key] = target_1[target_key].astype(np.float32)
                     target_2[target_key] = target_2[target_key].astype(np.float32)

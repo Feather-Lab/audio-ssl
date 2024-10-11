@@ -5,9 +5,9 @@ from torch import nn
 import torch.nn.functional as F
 import lightning as L
 
-import architectures
-from metrics import calculate_accuracy
-from loss_functions import MMCR_Loss as Dual_MMCR_Loss
+from . import architectures
+from .metrics import calculate_accuracy
+from .loss_functions import MMCR_Loss as Dual_MMCR_Loss
 import audio_ssl.losses as ssl_losses 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
@@ -15,6 +15,7 @@ from typing import List, Union, Tuple
 # from pprint import pprint
 # from composer.optim.scheduler import CosineAnnealingWithWarmupScheduler
 
+from .jsinV3DataLoader_precombined_batched import jsinV3_precombined_paired_batched
 import robustness.audio_functions.audio_transforms as at 
 from robustness.audio_functions.jsinV3DataLoader_precombined import jsinV3_precombined_paired
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
@@ -202,62 +203,76 @@ class LitAudioSSL(L.LightningModule):
         """
         return self.model(x)
     
-    # def collate_fn(self, batch):
-    #     """
-    #     Logic for generating views of speech and noise egs. 
-    #     """
-    #     batch = batch[0] # unbox wrapper added by dataloader 
-    #     signal_11, signal_12, signal_21, signal_22 = [], [], [], []
-    #     target_1 = batch[-2] # labels already collated 
-    #     target_2 = batch[-1] # labels already collated 
-    #     # convert labels to torch tensors 
-    #     if isinstance(target_1, dict):
-    #         for task_key, task_labels in target_1.items():
-    #             target_1[task_key] = torch.from_numpy(task_labels)
-    #     if isinstance(target_2, dict):
-    #         for task_key, task_labels in target_2.items():
-    #             target_2[task_key] = torch.from_numpy(task_labels)
-    #     else:
-    #         target_1 = torch.from_numpy(target_1) 
-    #         target_2 = torch.from_numpy(target_2) 
-    #     # convert signal and noise into signal
-    #     for (signal_1, signal_2, noise_1, noise_2) in  zip(*batch[:4]):
-    #         signal_11.append(self.transforms(signal_1, noise_1)[0])
-    #         signal_12.append(self.transforms(signal_1, noise_2)[0])
-    #         signal_21.append(self.transforms(signal_2, noise_1)[0])
-    #         signal_22.append(self.transforms(signal_2, noise_2)[0])
+    def collate_fn(self, batch):
+        """
+        Logic for generating views of speech and noise egs. 
+        """
+        batch = batch[0] # unbox wrapper added by dataloader 
+        signal_11, signal_12, signal_21, signal_22 = [], [], [], []
+        target_1 = batch[-2] # labels already collated 
+        target_2 = batch[-1] # labels already collated 
+        # convert labels to torch tensors 
+        if isinstance(target_1, dict):
+            for task_key, task_labels in target_1.items():
+                target_1[task_key] = torch.from_numpy(task_labels)
+        if isinstance(target_2, dict):
+            for task_key, task_labels in target_2.items():
+                target_2[task_key] = torch.from_numpy(task_labels)
+        else:
+            target_1 = torch.from_numpy(target_1) 
+            target_2 = torch.from_numpy(target_2) 
+        # convert signal and noise into signal
+        for (signal_1, signal_2, noise_1, noise_2) in  zip(*batch[:4]):
+            sig_11, _ = self.transforms(signal_1, noise_1)
+            sig_12, _ = self.transforms(signal_1, noise_2)
+            sig_21, _ = self.transforms(signal_2, noise_1)
+            sig_22, _ = self.transforms(signal_2, noise_2)
+            # dummy handle noise-only signals:
+            sig_11 = sig_12 if sig_11 is None else sig_11
+            sig_12 = sig_11 if sig_12 is None else sig_12
+            sig_21 = sig_22 if sig_21 is None else sig_21
+            sig_22 = sig_21 if sig_22 is None else sig_22
 
-    #     signal_11 = torch.cat(signal_11).unsqueeze(1) # add back channel dim
-    #     signal_12 = torch.cat(signal_12).unsqueeze(1) # add back channel dim
-    #     signal_21 = torch.cat(signal_21).unsqueeze(1) # add back channel dim
-    #     signal_22 = torch.cat(signal_22).unsqueeze(1) # add back channel dim
+            signal_11.append(sig_11)
+            signal_12.append(sig_12)
+            signal_21.append(sig_21)
+            signal_22.append(sig_22)
 
-    #     return signal_11, signal_12, signal_21, signal_22, target_1, target_2
-    
+        signal_11 = torch.cat(signal_11).unsqueeze(1) # add back channel dim
+        signal_12 = torch.cat(signal_12).unsqueeze(1) # add back channel dim
+        signal_21 = torch.cat(signal_21).unsqueeze(1) # add back channel dim
+        signal_22 = torch.cat(signal_22).unsqueeze(1) # add back channel dim
+
+        return signal_11, signal_12, signal_21, signal_22, target_1, target_2
+        
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
-        dataset = jsinV3_precombined_paired(root=self.config['data']['root'],
+        dataset = jsinV3_precombined_paired_batched(root=self.config['data']['root'],
                                             train=True,
+                                            batch_size=self.config['hparas']['batch_size'],
                                             transform=self.transforms)
         train_dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=self.config['hparas']['batch_size'],
+            batch_size=1,
             num_workers=self.config['num_workers'], 
             pin_memory=True,
             # persistent_workers=True,
             shuffle=False,
+            collate_fn=self.collate_fn
         )
         return train_dataloader
     
     def val_dataloader(self):
-        dataset = jsinV3_precombined_paired(root=self.config['data']['root'],
+        dataset = jsinV3_precombined_paired_batched(root=self.config['data']['root'],
                                             train=False,
+                                            batch_size=self.config['hparas']['batch_size'],
                                             transform=self.transforms)
         dataloader = torch.utils.data.DataLoader(
             dataset,
-            batch_size=self.config['hparas']['batch_size'],
+            batch_size=1,
             num_workers=self.config['num_workers'],
-            shuffle=False
+            shuffle=False,
+            collate_fn=self.collate_fn
         )
         return dataloader
 
