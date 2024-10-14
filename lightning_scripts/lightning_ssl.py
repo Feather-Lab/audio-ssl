@@ -5,19 +5,17 @@ from torch import nn
 import torch.nn.functional as F
 import lightning as L
 
-from . import architectures
-from .metrics import calculate_accuracy
-from .loss_functions import MMCR_Loss as Dual_MMCR_Loss
-import audio_ssl.losses as ssl_losses 
+import architectures
+from metrics import calculate_accuracy
+from loss_functions import MMCR_Loss 
+# import audio_ssl.losses as ssl_losses 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
 # from pprint import pprint
-# from composer.optim.scheduler import CosineAnnealingWithWarmupScheduler
 
-from .jsinV3DataLoader_precombined_batched import jsinV3_precombined_paired_batched
+from jsinV3DataLoader_precombined_batched import jsinV3_precombined_paired_batched
 import robustness.audio_functions.audio_transforms as at 
-from robustness.audio_functions.jsinV3DataLoader_precombined import jsinV3_precombined_paired
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
 
 class ModelWithFrontEnd(nn.Module):
@@ -67,18 +65,28 @@ class LitAudioSSL(L.LightningModule):
         # if torch.distributed.is_initialized():
         distributed = torch.distributed.is_initialized()
         self.ssl_task = self.config['hparas']['ssl_task']
-        if self.ssl_task == 'dual':
-            self.ssl_loss = Dual_MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
-        else:
-            self.ssl_loss = ssl_losses.__dict__[self.config['hparas']['ssl_loss']](**self.config['hparas']['ssl_loss_kwargs'], distributed=distributed)
-            # crop batch size for  data loader  by 2 for single-task ssl models 
-            self.config['hparas']['batch_size'] =  int(self.config['hparas']['batch_size'] // 2 )
+
+        # TODO: Update with Teddy's fixed implementation in future 
+        # if self.ssl_task == 'dual':
+        #     self.ssl_loss = Dual_MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
+        # else:
+        #     self.ssl_loss = ssl_losses.__dict__[self.config['hparas']['ssl_loss']](**self.config['hparas']['ssl_loss_kwargs'], distributed=distributed)
+        #     # crop batch size for  data loader  by 2 for single-task ssl models 
+
+        self.ssl_loss = MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
+
+        # cut batch size for dataloading logic - draw half the size becuase we concat 
+        # if self.ssl_task != 'dual':
+        #     self.config['hparas']['batch_size'] =  int(self.config['hparas']['batch_size'] // 2 )
         self.ssl_loss_str = self.config['hparas']['ssl_loss_str'] # str for logs 
+
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
         if self.opt_supervised_task:
             self.class_loss = nn.CrossEntropyLoss()
+
+        # get lower bound for MMCR task 
 
     def _step(self, batch, batch_idx, step_type):
         spec_11, spec_12, spec_21, spec_22, labels_1, labels_2 = batch
@@ -99,23 +107,24 @@ class LitAudioSSL(L.LightningModule):
         else:
             if self.ssl_task == 'word':
                 # group word pairs as augmentations
-                # stack 11 and 12 as augmentations along dim 1 
-                outs_1 =  torch.stack([out_11, out_12], dim=1)
-                # stack 21 and 22 as augmentations along dim 1 
-                outs_2 =  torch.stack([out_21, out_22], dim=1)
+                # cat 11 and 21 as batch view 1 along dim 0 
+                outs_1 =  torch.cat([out_11, out_21], dim=0)
+                # cat 12 and 22 as batch view 2 along dim 0 
+                outs_2 =  torch.cat([out_12, out_22], dim=0)
                 # concat 1x and 2x along batch dim -> b x n_aug x feats 
-                outs = torch.cat([outs_1, outs_2])
+                # outs = torch.cat([outs_1, outs_2])
 
             elif self.ssl_task == 'audioset':
                 # group audioset pairs as augmentations
-                # stack 11 and 21 as augmentations along dim 1 
-                outs_1 =  torch.stack([out_11, out_21], dim=1)
-                # stack 12 and 22 as augmentations along dim 1 
-                outs_2 =  torch.stack([out_12, out_22], dim=1)
+                # cat 11 and 21 as batch view 1 along dim 0 
+                outs_1 =  torch.cat([out_11, out_12], dim=0)
+                # cat 21 and 22 as batch view 2 along dim 0 
+                outs_2 =  torch.cat([out_21, out_22], dim=0)
                 # stack x1 and x2 along batch dimensions 
-                outs = torch.cat([outs_1, outs_2])
+                # outs = torch.cat([outs_1, outs_2])
 
-            loss_ssl, _  = self.ssl_loss(outs) 
+            # don't need to cat with "clean" MMCR implementation - z1 and z2 are the different views
+            loss_ssl = self.ssl_loss(outs_1, outs_2) 
 
         self.log(f"{step_type}_{self.ssl_loss_str}_loss", loss_ssl.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
@@ -143,6 +152,12 @@ class LitAudioSSL(L.LightningModule):
         total_loss = self.lambda_ssl * loss_ssl + class_loss
         self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
+        # log pretraining percent error (Eq. 4 in https://arxiv.org/pdf/2406.09366):
+        # (lower_bound - nuclear_norm_C) / lower_bound
+        # lower bound is sqrt(p * min(d,p)); p=points d=dimension
+        # Sum because loss is already negative 
+        ppe = (self.mmcr_lower_bound + loss_ssl.detach()) / self.mmcr_lower_bound
+        self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
         # add acc to log 
         return total_loss
@@ -150,9 +165,10 @@ class LitAudioSSL(L.LightningModule):
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "train")
 
-    def on_train_epoch_end(self):
-        self.train_dataloader.dataset._rotate_splits()
-        print(f"Updated rotation: {self.train_dataloader.dataset.rotate_index}")
+    # don't need this anymore - maintaining temporarily in case it becomes useful 
+    # def on_train_epoch_end(self): 
+    #     self.train_dataloader.dataset._rotate_splits()
+    #     print(f"Updated rotation: {self.train_dataloader.dataset.rotate_index}")
 
     def validation_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "val")
@@ -223,11 +239,13 @@ class LitAudioSSL(L.LightningModule):
             target_2 = torch.from_numpy(target_2) 
         # convert signal and noise into signal
         for (signal_1, signal_2, noise_1, noise_2) in  zip(*batch[:4]):
+            # if any([sig.sum() == 0 for sig in [signal_1, signal_2, noise_1, noise_2]]):
+            #     continue 
             sig_11, _ = self.transforms(signal_1, noise_1)
             sig_12, _ = self.transforms(signal_1, noise_2)
             sig_21, _ = self.transforms(signal_2, noise_1)
             sig_22, _ = self.transforms(signal_2, noise_2)
-            # dummy handle noise-only signals:
+            # # dummy handle noise-only signals:
             sig_11 = sig_12 if sig_11 is None else sig_11
             sig_12 = sig_11 if sig_12 is None else sig_12
             sig_21 = sig_22 if sig_21 is None else sig_21
@@ -293,3 +311,10 @@ class LitAudioSSL(L.LightningModule):
 
     def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
         return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_training_steps
+    
+    @property
+    def mmcr_lower_bound(self) -> int:
+        # precompute mmcr lower bound as prop 3.3 from https://arxiv.org/pdf/2406.09366
+        p = torch.tensor(self.config['hparas']['global_batch_size'])
+        d = torch.tensor(self.config['model']['arch_kwargs']['projector_dims'][-1])
+        return torch.sqrt(p * torch.min(p, d))

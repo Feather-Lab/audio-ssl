@@ -8,6 +8,8 @@ import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
 from argparse import ArgumentParser
 from lightning_classifier import LitWordAudioSetModel
+from lightning.pytorch.callbacks import LearningRateMonitor
+
 from lightning_ssl import LitAudioSSL 
 
 torch.set_float32_matmul_precision('medium')
@@ -34,12 +36,12 @@ def cli_main(args):
     config['num_workers'] = args.num_workers // args.gpus
     config['num_gpus'] = args.gpus
     # set batch size per task as global_batch // gpus 
-    config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
-
     if 'ssl' in config_path.stem:
         module = LitAudioSSL
+        config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
     else:
         module = LitWordAudioSetModel
+        config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
 
     checkpoint_dir = args.exp_dir / f"{config_path.stem}/checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +85,9 @@ def cli_main(args):
         verbose=True,
     )
     callbacks.append(train_checkpoint)
-
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+    callbacks.append(lr_monitor)
+    
     trainer = L.Trainer(
         precision="32",
         default_root_dir=args.exp_dir / config_path.stem,

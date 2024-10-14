@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=train_supervised
-#SBATCH --output=outLogs/train_word_aud_supervised_%j.out
-#SBATCH --error=outLogs/train_word_aud_supervised_%j.err
+#SBATCH --job-name=word_ssl
+#SBATCH --output=outLogs/train_word_ssl_%j.out
+#SBATCH --error=outLogs/train_word_ssl_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=14
@@ -12,7 +12,7 @@
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
 
-conda activate ~/ceph/conda_envs/cochdnn_ssl_pl
+mamba activate cochdnn_ssl_pl
 
 #export NCCL_DEBUG=INFO
 #export PYTHONFAULTHANDLER=1

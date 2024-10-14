@@ -15,7 +15,7 @@ val_metric:
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 10                              # Each "epoch" is 25 passes through the speech dataset
-  batch_size: 768                         
+  global_batch_size: 768                  # set global batch size as init. Will be divided by n gpus and task params
   optimizer: "LARS"
   lr: 0.2                                # initial LR 
   num_warmup_steps_or_ratio: 0.1
