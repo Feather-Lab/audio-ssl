@@ -111,6 +111,10 @@ class CosineWarmupScheduler(torch.optim.lr_scheduler._LRScheduler):
     def get_lr(self):
         step = self.last_epoch
         max_steps = self.max_steps
+        # TODO: From Teddy's comment, may want to update and move this out of the method
+        # Could refactor as:
+        #       alpha = 0.3 # instead of lr argument
+        #       base_lr = alpha * batch_size / 2048
         base_lr = self.lr * self.batch_size / 256
         if step < self.warmup_steps:
             lr = base_lr * step / self.warmup_steps

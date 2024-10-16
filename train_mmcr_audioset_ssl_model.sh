@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=word_ssl
-#SBATCH --output=outLogs/train_word_ssl_%j.out
-#SBATCH --error=outLogs/train_word_ssl_%j.err
+#SBATCH --output=outLogs/train_audioset_ssl_%j.out
+#SBATCH --error=outLogs/train_audioset_ssl_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=14
@@ -25,12 +25,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 
-# srun python3 lightning_scripts/train.py --config lightning_scripts/configs/word_audioset_resnet50_lower_lr.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --exp_dir model_checkpoints \
-#                                    --resume_training 
-
-srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_word_resnet50.yaml \
+srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_audioset_resnet50.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 

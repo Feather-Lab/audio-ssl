@@ -100,6 +100,7 @@ class LitAudioSSL(L.LightningModule):
         ## concat reps based on task 
         if self.ssl_task == 'dual':
             # concat pairs with same equivariances and get dual mmcr loss
+            # Word loss 
             outs_1 = torch.cat([out_11, out_21], dim=0)
             outs_2 = torch.cat([out_12, out_22], dim=0)
             loss_ssl = self.ssl_loss(outs_1, outs_2)
@@ -157,7 +158,7 @@ class LitAudioSSL(L.LightningModule):
         # lower bound is sqrt(p * min(d,p)); p=points d=dimension
         # Sum because loss is already negative 
         ppe = (self.mmcr_lower_bound + loss_ssl.detach()) / self.mmcr_lower_bound
-        self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+        self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # add acc to log 
         return total_loss
@@ -176,9 +177,10 @@ class LitAudioSSL(L.LightningModule):
     def configure_optimizers(self):
         # Optimizer
         if self.config['hparas']['optimizer'] == "LARS":
-            # lr = self.config['hparas']['lr'] * self.config['hparas']['batch_size']  / 256 
-            # if self.ssl_task == 'word' or self.ssl_task == 'audioset':
-            #     lr = lr * 2 # batch size is double here 
+            # Typical learning rate scheduling is handled in CosineWarmupScheduler
+            # as init_lr * batchsize / 256
+            # lr given to LARS is 0
+            #  CosineWarmupScheduler handles incrementing the LR
             self.optimizer = LARS(
                             self.model.parameters(),
                             lr=0,
@@ -306,8 +308,8 @@ class LitAudioSSL(L.LightningModule):
         max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
 
         if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps:
-            return self.trainer.max_steps
-        return max_estimated_steps
+            return int(self.trainer.max_steps)
+        return int(max_estimated_steps)
 
     def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
         return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_training_steps

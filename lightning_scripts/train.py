@@ -36,15 +36,72 @@ def cli_main(args):
     config['num_workers'] = args.num_workers // args.gpus
     config['num_gpus'] = args.gpus
     # set batch size per task as global_batch // gpus 
+
+    # set checkpoint dir 
+    checkpoint_dir = args.exp_dir / f"{config_path.stem}/checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    # get task-specific inits 
+    callbacks = []
     if 'ssl' in config_path.stem:
         module = LitAudioSSL
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
+
+        # TODO: init validation losses for SSL pre-training
+        if config['hparas']['ssl_loss'] == 'MMCR':
+            callbacks.append(ModelCheckpoint(
+                        checkpoint_dir,
+                        monitor=f"{config['val_metric']}",
+                        mode=config['val_metric_mode'],
+                        save_top_k=1,
+                        save_weights_only=True,
+                        verbose=True,
+            ))
+            
+        callbacks.append(ModelCheckpoint(
+            checkpoint_dir,
+            monitor="train_total_loss",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=True,
+            verbose=True,
+        ))
+
     else:
         module = LitWordAudioSetModel
         config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
 
-    checkpoint_dir = args.exp_dir / f"{config_path.stem}/checkpoints"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        if isinstance(config['val_metric'], dict):
+            for name, value in config['val_metric'].items():
+                callbacks.append(ModelCheckpoint(
+                    checkpoint_dir,
+                    filename="{epoch}-{step}-best_"+name,
+                    monitor=value,
+                    mode="max",
+                    save_top_k=1,
+                    # save_weights_only=True,
+                    verbose=True,
+                ))
+        else:
+            callbacks.append(ModelCheckpoint(
+                checkpoint_dir,
+                monitor=f"val_{config['val_metric']}",
+                mode="max" if 'acc' in config['val_metric'] else "min",
+                save_top_k=1,
+                save_weights_only=True,
+                verbose=True,
+            ))
+
+        callbacks.append(ModelCheckpoint(
+            checkpoint_dir,
+            monitor="train_loss",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=True,
+            verbose=True,
+        ))
+
+
     ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
     ckpt_path=None
     if args.resume_training and len(ckpt_paths) != 0:
@@ -54,37 +111,6 @@ def cli_main(args):
     else:
         model = module(config)
 
-    callbacks = []
-
-    if isinstance(config['val_metric'], dict):
-        for name, value in config['val_metric'].items():
-            callbacks.append(ModelCheckpoint(
-                checkpoint_dir,
-                filename="{epoch}-{step}-best_"+name,
-                monitor=value,
-                mode="max",
-                save_top_k=1,
-                # save_weights_only=True,
-                verbose=True,
-            ))
-    else:
-        callbacks.append(ModelCheckpoint(
-            checkpoint_dir,
-            monitor=f"val_{config['val_metric']}",
-            mode="max" if 'acc' in config['val_metric'] else "min",
-            save_top_k=1,
-            save_weights_only=True,
-            verbose=True,
-        ))
-    train_checkpoint = ModelCheckpoint(
-        checkpoint_dir,
-        monitor="train_loss",
-        mode="min",
-        save_top_k=1,
-        save_weights_only=True,
-        verbose=True,
-    )
-    callbacks.append(train_checkpoint)
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks.append(lr_monitor)
     
