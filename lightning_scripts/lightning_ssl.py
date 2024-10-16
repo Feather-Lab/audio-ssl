@@ -4,10 +4,11 @@ from torch import nn
 # import torchvision
 import torch.nn.functional as F
 import lightning as L
-
+import os, sys
+sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
 from metrics import calculate_accuracy
-from loss_functions import MMCR_Loss 
+import losses as ssl_losses
 # import audio_ssl.losses as ssl_losses 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
@@ -63,23 +64,10 @@ class LitAudioSSL(L.LightningModule):
         
         # init losses 
         # if torch.distributed.is_initialized():
-        distributed = torch.distributed.is_initialized()
+        self.distributed = torch.distributed.is_initialized()
         self.ssl_task = self.config['hparas']['ssl_task']
-
-        # TODO: Update with Teddy's fixed implementation in future 
-        # if self.ssl_task == 'dual':
-        #     self.ssl_loss = Dual_MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
-        # else:
-        #     self.ssl_loss = ssl_losses.__dict__[self.config['hparas']['ssl_loss']](**self.config['hparas']['ssl_loss_kwargs'], distributed=distributed)
-        #     # crop batch size for  data loader  by 2 for single-task ssl models 
-
-        self.ssl_loss = MMCR_Loss(distributed=distributed) # comeback to see if distrubuted needs to be true here 
-
-        # cut batch size for dataloading logic - draw half the size becuase we concat 
-        # if self.ssl_task != 'dual':
-        #     self.config['hparas']['batch_size'] =  int(self.config['hparas']['batch_size'] // 2 )
-        self.ssl_loss_str = self.config['hparas']['ssl_loss_str'] # str for logs 
-
+        self.ssl_loss = self.get_loss()
+    
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
@@ -99,33 +87,25 @@ class LitAudioSSL(L.LightningModule):
 
         ## concat reps based on task 
         if self.ssl_task == 'dual':
-            # concat pairs with same equivariances and get dual mmcr loss
-            # Word loss 
-            outs_1 = torch.cat([out_11, out_21], dim=0)
-            outs_2 = torch.cat([out_12, out_22], dim=0)
-            loss_ssl = self.ssl_loss(outs_1, outs_2)
+            # concat is handled in the paired loss function 
+            loss_ssl = self.ssl_loss(out_11, out_12, out_21, out_22)
 
         else:
             if self.ssl_task == 'word':
                 # group word pairs as augmentations
                 # cat 11 and 21 as batch view 1 along dim 0 
-                outs_1 =  torch.cat([out_11, out_21], dim=0)
+                z_1 =  torch.cat([out_11, out_21], dim=0)
                 # cat 12 and 22 as batch view 2 along dim 0 
-                outs_2 =  torch.cat([out_12, out_22], dim=0)
-                # concat 1x and 2x along batch dim -> b x n_aug x feats 
-                # outs = torch.cat([outs_1, outs_2])
+                z_2 =  torch.cat([out_12, out_22], dim=0)
 
             elif self.ssl_task == 'audioset':
                 # group audioset pairs as augmentations
                 # cat 11 and 21 as batch view 1 along dim 0 
-                outs_1 =  torch.cat([out_11, out_12], dim=0)
+                z_1 =  torch.cat([out_11, out_12], dim=0)
                 # cat 21 and 22 as batch view 2 along dim 0 
-                outs_2 =  torch.cat([out_21, out_22], dim=0)
-                # stack x1 and x2 along batch dimensions 
-                # outs = torch.cat([outs_1, outs_2])
-
-            # don't need to cat with "clean" MMCR implementation - z1 and z2 are the different views
-            loss_ssl = self.ssl_loss(outs_1, outs_2) 
+                z_2 =  torch.cat([out_21, out_22], dim=0)
+            # z_1 and z_2 are the different views
+            loss_ssl = self.ssl_loss(z_1, z_2) 
 
         self.log(f"{step_type}_{self.ssl_loss_str}_loss", loss_ssl.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
@@ -153,12 +133,13 @@ class LitAudioSSL(L.LightningModule):
         total_loss = self.lambda_ssl * loss_ssl + class_loss
         self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
-        # log pretraining percent error (Eq. 4 in https://arxiv.org/pdf/2406.09366):
-        # (lower_bound - nuclear_norm_C) / lower_bound
-        # lower bound is sqrt(p * min(d,p)); p=points d=dimension
-        # Sum because loss is already negative 
-        ppe = (self.mmcr_lower_bound + loss_ssl.detach()) / self.mmcr_lower_bound
-        self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        if 'mmcr' in self.ssl_loss_str:
+            # log pretraining percent error (Eq. 4 in https://arxiv.org/pdf/2406.09366):
+            # (lower_bound - nuclear_norm_C) / lower_bound
+            # lower bound is sqrt(p * min(d,p)); p=points d=dimension
+            # Sum because loss is already negative 
+            ppe = (self.mmcr_lower_bound + loss_ssl.detach()) / self.mmcr_lower_bound
+            self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # add acc to log 
         return total_loss
@@ -320,3 +301,21 @@ class LitAudioSSL(L.LightningModule):
         p = torch.tensor(self.config['hparas']['global_batch_size'])
         d = torch.tensor(self.config['model']['arch_kwargs']['projector_dims'][-1])
         return torch.sqrt(p * torch.min(p, d))
+
+    def get_loss_fn(self, loss_fn_name, loss_kwargs):
+        loss_fn = ssl_losses.__dict__[loss_fn_name]
+        return loss_fn(**loss_kwargs, distributed=self.distributed) if loss_kwargs else loss_fn(distributed=self.distributed)
+
+    def get_loss(self):
+        self.ssl_loss_str = self.config['hparas']['ssl_loss_str'] # str for logs 
+        loss_kwargs = self.config['hparas'].get('ssl_loss_kwargs', None) 
+        if 'paired' in  self.ssl_loss_str:
+            loss_fn_inv_kwargs = loss_kwargs.get('loss_fn_inv_kwargs', None) 
+            loss_fn_eq_kwargs = loss_kwargs.get('loss_fn_eq_kwargs', None) 
+            loss_fn_inv = self.get_loss_fn(loss_kwargs['loss_fn_inv'], loss_fn_inv_kwargs)
+            loss_fn_eq = self.get_loss_fn(loss_kwargs['loss_fn_eq'], loss_fn_eq_kwargs)
+            paired_loss =  ssl_losses.__dict__[self.config['hparas']['ssl_loss']]
+            ssl_loss = paired_loss(loss_fn_inv=loss_fn_inv, loss_fn_eq=loss_fn_eq, lmda=loss_kwargs['lmda'])
+        else:
+            ssl_loss = self.get_loss_fn(self.config['hparas']['ssl_loss'], loss_kwargs)
+        return ssl_loss

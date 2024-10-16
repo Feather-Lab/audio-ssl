@@ -43,10 +43,9 @@ class SimCLR_Loss(nn.Module):
         else:
             self.rank = 0
             self.world_size = 1
-
         if self.pos_mask is None:
             self.num_pos = 2
-            self.effective_batch_size = self.world_size * z1[0].shape[0] * self.num_pos
+            self.effective_batch_size = self.world_size * z1.shape[0] * self.num_pos
             self.precompute_pos_neg_mask()
 
         z = torch.cat([z1, z2], dim=0)

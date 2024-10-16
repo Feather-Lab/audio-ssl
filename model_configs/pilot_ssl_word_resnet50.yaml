@@ -10,8 +10,8 @@ audio_transforms:
   high_snr: 10
   dbspl: 60
 
-val_metric: 'val_ppe'
-val_metric_mode: 'min'
+# val_metric: 'val_ppe'
+# val_metric_mode: 'min'
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 10                              # Each "epoch" is 25 passes through the speech dataset
@@ -23,9 +23,7 @@ hparas:                                   # Experiment hyper-parameters
   valid_step: 5000
   ssl_task: 'word'                            # either 'word', 'audioset', 'dual'
   ssl_loss_str: 'mmcr'
-  ssl_loss: 'MMCR'
-  ssl_loss_kwargs:
-    lmbda: 0.0
+  ssl_loss: 'MMCR_Loss'
 
 model:                                    # Model architecture
   arch_name: "SSLAudioModel"
