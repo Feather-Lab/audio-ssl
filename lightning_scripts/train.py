@@ -48,7 +48,7 @@ def cli_main(args):
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
 
         # TODO: init validation losses for SSL pre-training
-        if config['hparas']['ssl_loss'] == 'MMCR':
+        if config.get("val_metric", None): 
             callbacks.append(ModelCheckpoint(
                         checkpoint_dir,
                         monitor=f"{config['val_metric']}",
