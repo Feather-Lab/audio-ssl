@@ -67,7 +67,7 @@ class LitAudioSSL(L.LightningModule):
         self.distributed = torch.distributed.is_initialized()
         self.ssl_task = self.config['hparas']['ssl_task']
         self.ssl_loss = self.get_loss()
-    
+
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
@@ -280,10 +280,6 @@ class LitAudioSSL(L.LightningModule):
     # @property
     def total_training_steps(self) -> int:
         dataset_size = len(self.train_dataloader())
-        # pprint(vars(self.trainer))
-        # print(self.trainer.num_gpus)
-
-        # num_devices = self.trainer.devices if self.trainer.devices else self.trainer.num_processes
         num_devices = self.config['num_gpus']
         effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
         max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
