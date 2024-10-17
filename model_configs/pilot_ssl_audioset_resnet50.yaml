@@ -23,12 +23,10 @@ hparas:                                   # Experiment hyper-parameters
   valid_step: 5000
   ssl_task: 'audioset'                            # either 'word', 'audioset', 'dual'
   ssl_loss_str: 'mmcr'
-  ssl_loss: 'MMCR'
-  ssl_loss_kwargs:
-    lmbda: 0.0
+  ssl_loss: 'MMCR_Loss'
 
 model:                                    # Model architecture
-  arch_name: "SSLAudioModel"
+  arch_name: "SSLAudioModelWMetamers"
   arch_kwargs:
     projector_dims: [512, 512]
     proj_out_dim: 2048

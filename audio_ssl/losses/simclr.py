@@ -8,7 +8,6 @@ from typing import Tuple
 
 import sys
 
-
 class SimCLR_Loss(nn.Module):
     def __init__(self, tau: float, distributed: bool = True):
         """

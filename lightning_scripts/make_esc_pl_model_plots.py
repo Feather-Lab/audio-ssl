@@ -683,7 +683,7 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
 if __name__ == '__main__':
     import argparse
     from lightning_classifier import LitWordAudioSetModel
-
+    from lightning_ssl import LitAudioSSL
 
     #########PARSE THE ARGUMENTS FOR THE FUNCTION#########
     parser = argparse.ArgumentParser(description='Input parameters for SVM evaluation of ESC-50')
@@ -742,10 +742,14 @@ if __name__ == '__main__':
     else:
         ckpt_path = args.ckpt_path
 
-    module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
-    metamer_layers = module.metamer_layers
+    if 'ssl' in config_path.stem:
+        module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    else:
+        module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        
     model = module.model.eval()
 
+    metamer_layers = module.metamer_layers
     # model, ds, metamer_layers = build_network.main(return_metamer_layers=True)
     print("Layer name: "+str(metamer_layers[args.LAYER_IDX]))
     model = model.cuda()
