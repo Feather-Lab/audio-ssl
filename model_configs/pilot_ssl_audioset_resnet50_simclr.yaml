@@ -10,8 +10,8 @@ audio_transforms:
   high_snr: 10
   dbspl: 60
 
-val_metric: 'val_ppe'
-val_metric_mode: 'min'
+# val_metric: 'val_ppe'
+# val_metric_mode: 'min'
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 10                              # Each "epoch" is 25 passes through the speech dataset

@@ -6,7 +6,7 @@
 #SBATCH --gpus=1
 
 #SBATCH --mem=100Gb
-#SBATCH --time=3:00:00
+#SBATCH --time=4:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 ##SBATCH --array=1,3-7 #0-7 for current 

@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
-#SBATCH --array=1,2,4,5 # 0-5 in manifest
+#SBATCH --array=1,4 # 0-5 in manifest
 
 # module purge
 # module load python
