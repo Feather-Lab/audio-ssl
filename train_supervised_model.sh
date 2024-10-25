@@ -7,19 +7,19 @@
 #SBATCH --cpus-per-gpu=12
 
 #SBATCH --mem=68Gb
-#SBATCH --time=1-00:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
 
-module purge
-module load python
-module load cuda cudnn nccl
+# module purge
+# module load python
+# module load cuda cudnn nccl
 
-conda activate ~/ceph/conda_envs/cochdnn_ssl_pl
+conda activate cochdnn_ssl_pl
 
-export NCCL_DEBUG=INFO
-export PYTHONFAULTHANDLER=1
+# export NCCL_DEBUG=INFO
+# export PYTHONFAULTHANDLER=1
 
 export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
 master_node=$SLURMD_NODENAME
@@ -29,13 +29,19 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/word_resnet50_orig_lr.yaml \
-                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-                                   --exp_dir model_checkpoints \
-                                   --resume_training 
-
-# srun python3 lightning_scripts/train.py --config_path model_configs/word_audioset_resnet50_lower_lr_slower_schedule_5.yaml \
+# srun python3 lightning_scripts/train.py --config_path model_configs/word_resnet50_orig_lr.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
+
+# srun python3 lightning_scripts/train.py --config_path model_configs/word_audioset_resnet50_lower_lr_rand_crop.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+#                                    --resume_training 
+
+
+srun python3 lightning_scripts/train.py --config_path model_configs/word_audioset_resnet50_lower_lr_center_crop.yaml \
+                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+                                   --exp_dir model_checkpoints \
+                                   --resume_training 
 

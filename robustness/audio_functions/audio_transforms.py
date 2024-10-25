@@ -373,6 +373,30 @@ class RandomCropForegroundBackground(torch.nn.Module):
             background_wav = background_wav[rand_start[1]:rand_start[1]+self.crop_length]
         return foreground_wav, background_wav
 
+class CenterCropForegroundBackground(torch.nn.Module):
+    """
+    Center crops the foreground and background to make a shorter signal.
+    """
+    def __init__(self, signal_size, crop_length):
+        super(CenterCropForegroundBackground, self).__init__()
+        self.crop_length = crop_length
+        self.signal_size = signal_size
+        self.start_crop_center = int((signal_size-crop_length)/2)
+        
+    def forward(self, foreground_wav, background_wav):
+        """
+        Args:
+            foreground_wav (torch.Tensor): the waveform that will be used as
+                the foreground audio sample (usually speech)
+            background_wav (torch.Tensor): the waveform that will be used as
+                the background audio sample
+        """
+        if foreground_wav is not None:
+            foreground_wav = foreground_wav[self.start_crop_center:self.start_crop_center+self.crop_length]
+        if background_wav is not None:
+            background_wav = background_wav[self.start_crop_center:self.start_crop_center+self.crop_length]
+        return foreground_wav, background_wav
+    
 class CenterCropForegroundRandomCropBackground(torch.nn.Module):
     """
     Center crops the foreground and randomly crops background to make a shorter signal.

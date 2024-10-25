@@ -29,13 +29,23 @@ class LitWordAudioSetModel(L.LightningModule):
         self.config = config 
 
         # Init audio transforms 
-        self.transforms = at.AudioCompose([
-                at.AudioToTensor(),
-                at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
-                                          high_snr=config['audio_transforms']['high_snr']),
-                at.DBSPLNormalizeForegroundAndBackground(dbspl=config['audio_transforms']['dbspl']),
-                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
-            ])
+        if self.config['audio_transforms'].get('crop', False): # crop will be string name of crop class
+            self.transforms = at.AudioCompose([
+                    at.AudioToTensor(),
+                    at.__dict__[self.config['audio_transforms']['crop']](**self.config['audio_transforms']['crop_kwrgs']),
+                    at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
+                                            high_snr=config['audio_transforms']['high_snr']),
+                    at.RMSNormalizeForegroundAndBackground(rms_level=config['audio_transforms']['rms_level']),
+                    at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+                ])
+        else:
+            self.transforms = at.AudioCompose([
+                    at.AudioToTensor(),
+                    at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
+                                            high_snr=config['audio_transforms']['high_snr']),
+                    at.RMSNormalizeForegroundAndBackground(rms_level=config['audio_transforms']['rms_level']),
+                    at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+                ])
 
         # Get audio config and init representation 
         self.audio_config = AUDIO_INPUT_REPRESENTATIONS[config['audio_rep']['name']]
@@ -108,6 +118,9 @@ class LitWordAudioSetModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "val")
+    
+    def test_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "test")
 
     def configure_optimizers(self):
         # Optimizer

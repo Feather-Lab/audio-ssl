@@ -90,10 +90,37 @@ cochleagram_1_7_secs = {'rep_type': 'cochleagram',
                                         'clip_value': 5, # This wil clip cochleagram values < ~0.04
                                         'power': 0.3}
                 }
+# Same as cochleagram 1, but for 1.5 seconds of audio, as an example. 
+cochleagram_1_1_5_secs = {'rep_type': 'cochleagram',
+                 'rep_kwargs': {'signal_size':30000,
+                                'sr':20000,
+                                'env_sr': 200,
+                                'pad_factor':None,
+                                'use_rfft':True,
+                                'coch_filter_type': chcochleagram.cochlear_filters.ERBCosFilters,
+                                'coch_filter_kwargs': {
+                                    'n':50,
+                                    'low_lim':50,
+                                    'high_lim':10000,
+                                    'sample_factor':4,
+                                    'full_filter':False,
+                                    },
+                                'env_extraction_type': chcochleagram.envelope_extraction.HilbertEnvelopeExtraction,
+                                'downsampling_type': chcochleagram.downsampling.SincWithKaiserWindow,
+                                'downsampling_kwargs': {
+                                    'window_size':1001},
+                               },
+                 'compression_type': 'coch_p3',
+                 'compression_kwargs': {'scale': 1,
+                                        'offset':1e-8,
+                                        'clip_value': 5, # This wil clip cochleagram values < ~0.04
+                                        'power': 0.3}
+                }
 
 
 AUDIO_INPUT_REPRESENTATIONS = {'log_mel_spec_0': log_mel_spec_0,
                                'mel_spec_0': mel_spec_0,
                                'cochleagram_1': cochleagram_1,
                                'cochleagram_1_7_secs':cochleagram_1_7_secs,
+                               'cochleagram_1_1_5_secs': cochleagram_1_1_5_secs
                               }

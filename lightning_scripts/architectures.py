@@ -33,7 +33,7 @@ class SSLAudioModel(nn.Module):
         if not self.supervised:
             return feature, out, None 
         else:
-            logits = self.lin_cls(feature)
+            logits = self.lin_cls(feature.detach())
         return feature, out, logits
     
     
@@ -66,5 +66,5 @@ class SSLAudioModelWMetamers(nn.Module):
         if not self.supervised:
             return feature, out, None 
         else:
-            logits = self.lin_cls(feature)
+            logits = self.lin_cls(feature.detach())
         return feature, out, logits

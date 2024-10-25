@@ -5,6 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import lightning as L
 import os, sys
+
 sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
 from metrics import calculate_accuracy
@@ -41,13 +42,23 @@ class LitAudioSSL(L.LightningModule):
         self.config = config 
 
         # Init audio transforms 
-        self.transforms = at.AudioCompose([
-                at.AudioToTensor(),
-                at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
-                                          high_snr=config['audio_transforms']['high_snr']),
-                at.DBSPLNormalizeForegroundAndBackground(dbspl=config['audio_transforms']['dbspl']),
-                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
-            ])
+        if self.config['audio_transforms'].get('crop', False): # crop will be string name of crop class
+            self.transforms = at.AudioCompose([
+                    at.AudioToTensor(),
+                    at.__dict__[self.config['audio_transforms']['crop']](**self.config['audio_transforms']['crop_kwrgs']),
+                    at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
+                                            high_snr=config['audio_transforms']['high_snr']),
+                    at.DBSPLNormalizeForegroundAndBackground(dbspl=config['audio_transforms']['dbspl']),
+                    at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+                ])
+        else:
+            self.transforms = at.AudioCompose([
+                    at.AudioToTensor(),
+                    at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
+                                            high_snr=config['audio_transforms']['high_snr']),
+                    at.DBSPLNormalizeForegroundAndBackground(dbspl=config['audio_transforms']['dbspl']),
+                    at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+                ])
 
         # Get audio config and init representation 
         self.audio_config = AUDIO_INPUT_REPRESENTATIONS[config['audio_rep']['name']]
@@ -170,6 +181,37 @@ class LitAudioSSL(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "val")
+
+    def test_step(self, batch, batch_idx):
+        # Test step only for JSIN eval 
+        spec_11, spec_12, spec_21, spec_22, labels_1, labels_2 = batch
+                # pass pairs through model 
+        _, _, logits_11 = self.model(spec_11)
+        _, _, logits_12 = self.model(spec_12)
+        _, _, logits_21 = self.model(spec_21)
+        _, _, logits_22 = self.model(spec_22)
+
+        class_loss = 0.0
+        # get classification loss
+        class_loss_11 = self.class_loss(logits_11, labels_1)
+        class_loss_12 = self.class_loss(logits_12, labels_1)
+        class_loss_21 = self.class_loss(logits_21, labels_2)
+        class_loss_22 = self.class_loss(logits_22, labels_2)
+        class_loss = class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22
+        class_loss = class_loss / 4.0
+
+        # calc acc 
+        acc = 0 
+        acc += calculate_accuracy(logits_11, labels_1).item()
+        acc += calculate_accuracy(logits_12, labels_1).item()
+        acc += calculate_accuracy(logits_21, labels_2).item()
+        acc += calculate_accuracy(logits_22, labels_2).item()
+        acc /= 4.0  
+
+        self.log(f"test_class_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"test_class_loss", class_loss.detach(), on_step=True, on_epoch=True, prog_bar=True)
+        return class_loss
+
 
     def configure_optimizers(self):
         # Optimizer

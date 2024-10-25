@@ -3,7 +3,8 @@ import lightning as L
 import yaml
 import sys, os
 import pickle
-from lightning_scripts.lightning_classifier import LitWordAudioSetModel 
+from lightning_classifier import LitWordAudioSetModel 
+from lightning_ssl import LitAudioSSL 
 from pathlib import Path 
 import pathlib
 from argparse import ArgumentParser
@@ -37,10 +38,14 @@ def cli_main(args):
     else:
         ckpt_path = args.ckpt_path
 
-    model = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    if 'ssl' in config_path.stem:
+        model = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    else:
+        model = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        
     val_loader = model.val_dataloader() # will be populated with relevant args in config 
     trainer = L.Trainer(devices=args.gpus)
-    trainer.validate(model, dataloaders=val_loader)
+    trainer.test(model, dataloaders=val_loader)
 
 if __name__ == "__main__":
     parser = ArgumentParser()

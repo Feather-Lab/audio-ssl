@@ -6,12 +6,12 @@
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=12
 
-#SBATCH --mem=68Gb
+#SBATCH --mem=64Gb
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
-#SBATCH --array=1,4 # 0-5 in manifest
+#SBATCH --array=0,3 # 0-5 in manifest
 
 # module purge
 # module load python
@@ -33,5 +33,5 @@ srun python3 lightning_scripts/train.py --config_list train_config_manifests/sin
                                    --array_id $SLURM_ARRAY_TASK_ID \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
-                                   --resume_training 
+                                 #  --resume_training 
 

@@ -35,5 +35,5 @@ model:                                    # Model architecture
     projector_dims: [512, 512]
     proj_out_dim: 2048
     n_classes: 794
-    supervised: False
+    supervised: True
     
