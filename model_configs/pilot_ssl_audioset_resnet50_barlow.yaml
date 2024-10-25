@@ -33,7 +33,7 @@ model:                                    # Model architecture
   arch_name: "SSLAudioModelWMetamers"
   arch_kwargs:
     projector_dims: [512, 512]
-    proj_out_dim: 2048
+    proj_out_dim: 2048                    # is output from ResNet50
     n_classes: 794
     supervised: True
     

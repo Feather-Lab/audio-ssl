@@ -30,7 +30,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_word_resnet50.yaml \
+srun python3 lightning_scripts/train.py --config_path model_configs/mmcr_search/ssl_mmcr_audioset_resnet50_hparam_set_0.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 
