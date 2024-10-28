@@ -9,13 +9,16 @@ data:
   root: /mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/
 hparas:
   epochs: 10
-  global_batch_size: 768
+  global_batch_size: 256
   lambda_ssl: 1
   lr: 0.2
   num_warmup_steps_or_ratio: 0.1
   optimizer: LARS
-  ssl_loss: MMCR_Loss
-  ssl_loss_str: mmcr
+  ssl_loss: Barlow_Loss
+  ssl_loss_kwargs:
+    lmbda: 0.005
+    out_dim: 2048
+  ssl_loss_str: barlow
   ssl_task: word
   valid_step: 5000
 lr: 0.6
@@ -24,7 +27,7 @@ model:
     n_classes: 794
     proj_out_dim: 2048
     projector_dims:
-    - 8192
-    - 8192
+    - 2048
+    - 2048
     supervised: true
   arch_name: SSLAudioModelWMetamers
