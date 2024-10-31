@@ -11,7 +11,7 @@
 
 module load slurm gcc python3
 
-conda activate ~/ceph/conda_envs/cochdnn_ssl_pl
+mamba activate cochdnn_ssl_pl
 
 export LC_ALL=C; unset XDG_RUNTIME_DIR && jupyter lab --no-browser --ip='0.0.0.0' --port=1338
 

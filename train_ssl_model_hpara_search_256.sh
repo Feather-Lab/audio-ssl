@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=train_supervised
-#SBATCH --output=outLogs/train_ssl_single_task_%A_%a.out
-#SBATCH --error=outLogs/train_ssl_single_task_%A_%a.err
+#SBATCH --output=outLogs/train_ssl_single_task_256_%A_%a.out
+#SBATCH --error=outLogs/train_ssl_single_task_256_%A_%a.err
 #SBATCH --ntasks-per-node=2
 #SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-gpu=12

@@ -232,7 +232,7 @@ class LitAudioSSL(L.LightningModule):
             num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
             lr_scheduler = CosineWarmupScheduler(
                 optimizer=self.optimizer,
-                batch_size=self.config['hparas']['batch_size'], # is scaled to per-device batch size
+                batch_size=self.config['hparas']['global_batch_size'], # is global batch size
                 warmup_steps=num_warmup_steps,
                 max_steps=total_training_steps,
                 lr=self.config['hparas']['lr']
