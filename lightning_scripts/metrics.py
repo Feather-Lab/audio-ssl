@@ -1,5 +1,8 @@
 import torch 
 
-def calculate_accuracy(logits, labels):
+def calculate_accuracy(logits, labels, reduce=True):
     preds = torch.argmax(logits, dim=1)
-    return (preds == labels).float().mean()
+    if reduce:
+        return (preds == labels).float().mean()
+    else:
+        return  (preds == labels).float()
