@@ -50,9 +50,9 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --batch_size 192 \
 #                                    --array_ix $SLURM_ARRAY_TASK_ID
 
-python3 lightning_scripts/eval_jsin.py --config_list_path train_config_manifests/single_task_ssl_hpara_search_bs_256.pkl \
+python3 lightning_scripts/eval_jsin.py --config_list_path train_config_manifests/single_task_ssl_hpara_search_bs_768.pkl \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --array_ix $SLURM_ARRAY_TASK_ID
+                                   --array_ix $SLURM_ARRAY_TASK_ID \
 
