@@ -14,9 +14,19 @@ hparas:
   lr: 0.6
   num_warmup_steps_or_ratio: 0.1
   optimizer: LARS
-  ssl_loss: MMCR_Loss
-  ssl_loss_str: mmcr
   ssl_task: dual
+  ssl_loss: "Paired_Loss"
+  ssl_loss_str: "paired"
+  ssl_loss_kwargs:
+    loss_fn_inv: "Barlow_Loss"
+    loss_fn_eq: "Barlow_Loss"
+    loss_fn_inv_kwargs:
+      lmbda: 0.005
+      out_dim: 512
+    loss_fn_eq_kwargs:
+      lmbda: 0.005
+      out_dim: 512
+    lmda: 0.5
   valid_step: 5000
 model:
   arch_kwargs:
@@ -27,5 +37,3 @@ model:
     - 512
     supervised: true
   arch_name: SSLAudioModelWMetamers
-val_metric: val_ppe
-val_metric_mode: min

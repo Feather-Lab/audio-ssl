@@ -48,16 +48,28 @@ def cli_main(args):
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
 
         # TODO: init validation losses for SSL pre-training
-        if config.get("val_metric", None): 
-            callbacks.append(ModelCheckpoint(
-                        checkpoint_dir,
-                        monitor=f"{config['val_metric']}",
-                        mode=config['val_metric_mode'],
-                        save_top_k=1,
-                        save_weights_only=True,
-                        verbose=True,
-            ))
-            
+        val_metrics = config.get("val_metric", None)
+        if val_metrics: 
+            if isinstance(val_metrics, list):
+                for metric in val_metrics:
+                    callbacks.append(ModelCheckpoint(
+                                checkpoint_dir,
+                                monitor=f"{metric}",
+                                mode=config['val_metric_mode'],
+                                save_top_k=1,
+                                save_weights_only=True,
+                                verbose=True,
+                    ))
+            else:   
+                callbacks.append(ModelCheckpoint(
+                            checkpoint_dir,
+                            monitor=f"{config['val_metric']}",
+                            mode=config['val_metric_mode'],
+                            save_top_k=1,
+                            save_weights_only=True,
+                            verbose=True,
+                ))
+                
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
             monitor="train_total_loss",

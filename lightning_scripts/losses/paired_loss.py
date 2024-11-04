@@ -3,7 +3,7 @@ from torch import nn, Tensor
 
 
 class Paired_Loss(nn.Module):
-    def __init__(self, loss_fn_inv: nn.Module, loss_fn_eq: nn.Module, lmda: float):
+    def __init__(self, loss_fn_inv: nn.Module, loss_fn_eq: nn.Module, lmda: float, **kwargs):
         """
         Module for computing the Paired/Equivariant Loss Function
 
@@ -41,4 +41,4 @@ class Paired_Loss(nn.Module):
         eq_loss = self.loss_fn_eq(z1_eq, z2_eq)
 
         loss = (1 - self.lmda) * inv_loss + self.lmda * eq_loss
-        return loss
+        return loss, inv_loss, eq_loss
