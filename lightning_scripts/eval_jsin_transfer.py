@@ -14,7 +14,7 @@ from audio_ssl.misc import LARS
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from metrics import calculate_accuracy
 import pathlib
-from argparse import ArgumentParser
+from argparse import ArgumentParser, BooleanOptionalAction
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -28,8 +28,8 @@ class SSLWordClassifier(L.LightningModule):
         # init the pretrained LightningModule
         self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config).eval()
         self.feature_extractor = torch.compile(self.feature_extractor)
-
         self.feature_extractor.freeze()
+
         # softcode size dict at some point 
         layer_size_dict = {'input_after_preproc': 211,
                             'conv1': 6784,
@@ -45,8 +45,22 @@ class SSLWordClassifier(L.LightningModule):
         
         proj_out_dim = layer_size_dict[layer_out]
         # init trainable word classifier  
-        self.classifier = torch.nn.Linear(proj_out_dim,
-                                          config['model']['arch_kwargs']['n_classes'])
+        if config['model'].get('classifier', False):
+            # Classifier is MLP defined by hparas
+            # projection head (Following exactly barlow twins offical repo)
+            hidden_dims = [proj_out_dim] + config['model']['classifier']['hidden_dims']
+            layers = []
+            for i in range(len(hidden_dims)-1):
+                layers.append(
+                    nn.Linear(hidden_dims[i], hidden_dims[i + 1], bias=False)
+                )
+                layers.append(nn.BatchNorm1d(hidden_dims[i + 1]))
+                layers.append(nn.ReLU())
+            layers.append(nn.Linear(hidden_dims[-1], config['model']['arch_kwargs']['n_classes'], bias=False))
+            self.classifier = nn.Sequential(*layers)
+        else:
+            self.classifier = torch.nn.Linear(proj_out_dim,
+                                            config['model']['arch_kwargs']['n_classes'])
         self.loss = nn.CrossEntropyLoss()
 
     def forward(self, x):
@@ -66,7 +80,7 @@ class SSLWordClassifier(L.LightningModule):
         audio, labels = batch
         logits = self.forward(audio) 
         loss = self.loss(logits, labels)
-        self.log(f"{step_type}_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True)
+        self.log(f"{step_type}_classifier_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True)
         return loss 
     
     def training_step(self, batch, batch_idx):
@@ -103,8 +117,8 @@ class SSLWordClassifier(L.LightningModule):
         else:
             opt = getattr(torch.optim, self.config['hparas']['optimizer'])
             self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr'])     
-            # self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
-        return [self.optimizer] # , [self.schedule]
+        self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1) 
+        return [self.optimizer], [self.schedule]
     
     def collate_fn(self, batch):
         batch = batch[0] # unbox wrapper added by dataloader 
@@ -179,6 +193,13 @@ def cli_main(args):
     config['hparas']['lr'] = 0.6
     config['hparas']['epochs'] = 10
 
+    if args.w_mlp:
+        config['model']['classifier'] = {}
+        config['model']['classifier']['hidden_dims'] = [args.mlp_dim]
+        mlp_str = "_w_mlp"
+    else:
+        mlp_str = ""
+
 
     # get checkpoint for ssl model 
     if args.ckpt_path == "":
@@ -189,7 +210,7 @@ def cli_main(args):
     else:
         ckpt_path = args.ckpt_path
 
-    classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints"
+    classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{config['hparas']['optimizer']}{mlp_str}"
 
     module = SSLWordClassifier(config=config,
                            ckpt_path=ckpt_path,
@@ -206,7 +227,7 @@ def cli_main(args):
     callbacks.append(EarlyStopping(monitor="train_loss", mode="min"))
 
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               name=f"{config_path.stem}_word_classifier",
+                               name=f"{config_path.stem}_word_classifier_{config['hparas']['optimizer']}{mlp_str}",
                                group='word_classifier_transfer',
                                project='cochdnn')
 
@@ -299,6 +320,9 @@ if __name__ == "__main__":
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
     parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
+    parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
+    parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
+
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     args = parser.parse_args()
 
