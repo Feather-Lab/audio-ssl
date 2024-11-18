@@ -253,8 +253,9 @@ class LitAudioSSL(L.LightningModule):
             ]                                                
 
         else:
+            lr = self.config['hparas']['lr'] * self.config['hparas']['global_batch_size'] / 256 
             opt = getattr(torch.optim, self.config['hparas']['optimizer'])
-            self.optimizer = opt(self.model.parameters(), lr=self.config['hparas']['lr'])      
+            self.optimizer = opt(self.model.parameters(), lr=lr)      
         return [self.optimizer]
 
     def forward(self, x):
@@ -350,12 +351,12 @@ class LitAudioSSL(L.LightningModule):
         effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
         max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
 
-        if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps:
+        if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps and self.trainer.max_steps != -1:
             return int(self.trainer.max_steps)
         return int(max_estimated_steps)
 
     def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
-        return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_training_steps
+        return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
     
     @property
     def mmcr_lower_bound(self) -> int:
