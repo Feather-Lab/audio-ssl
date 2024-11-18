@@ -6,11 +6,13 @@ import pathlib
 import argparse
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from argparse import ArgumentParser
 from lightning_classifier import LitWordAudioSetModel
 from lightning.pytorch.callbacks import LearningRateMonitor
 
 from lightning_ssl import LitAudioSSL 
+from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -44,7 +46,10 @@ def cli_main(args):
     # get task-specific inits 
     callbacks = []
     if 'ssl' in config_path.stem:
-        module = LitAudioSSL
+        if config['hparas'].get('sep_class_opt', False):
+            module = LitAudioSSLSepClassOpt
+        else:
+            module = LitAudioSSL
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
 
         # TODO: init validation losses for SSL pre-training
@@ -126,7 +131,14 @@ def cli_main(args):
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks.append(lr_monitor)
     
+    wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
+                               version=config_path.stem,
+                               project='cochdnn')
+
+
+    grad_clip = config['hparas'].get('gradient_clip_val', 1) if not config['hparas'].get('sep_class_opt', False) else False
     trainer = L.Trainer(
+        logger=wandb_logger,
         precision="32",
         default_root_dir=args.exp_dir / config_path.stem,
         max_epochs=config['hparas']['epochs'],
@@ -134,7 +146,7 @@ def cli_main(args):
         devices=args.gpus,
         accelerator="gpu", 
         strategy='ddp',
-        gradient_clip_val=1, # clipt grad l2 norm to 1 
+        gradient_clip_val=grad_clip, # clipt grad l2 norm to 1 
         # val_check_interval=config['hparas']['valid_step'], # just validate every epoch 
         profiler=None,
         callbacks=callbacks)
