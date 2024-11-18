@@ -5,11 +5,11 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH --gpus=1
 
-#SBATCH --mem=16Gb
+#SBATCH --mem=24Gb
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --constraint=a100  # if you want a particular type of GPU
+#SBATCH --constraint=h100  # if you want a particular type of GPU
 #SBATCH --array=0 #-17 #0-7 for current 
 
 module load cuda cudnn nccl
@@ -23,7 +23,7 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-python3 lightning_scripts/eval_jsin_transfer.py --config_list_path train_config_manifests/single_task_barlow_hpara_search_bs_256.pkl \
+python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/barlow_search/ssl_barlow_word_resnet50_hparam_set_13.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \

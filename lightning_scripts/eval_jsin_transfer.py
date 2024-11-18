@@ -8,13 +8,15 @@ import pickle
 from lightning_ssl import LitAudioSSL 
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import WandbLogger
 
+from audio_ssl.misc import LARS
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from metrics import calculate_accuracy
 import pathlib
 from argparse import ArgumentParser
 
-torch.set_float32_matmul_precision('high')
+torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
@@ -24,14 +26,25 @@ class SSLWordClassifier(L.LightningModule):
         self.config = config
         self.layer_out = layer_out
         # init the pretrained LightningModule
-        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config).eval()
+        self.feature_extractor = torch.compile(self.feature_extractor)
+
         self.feature_extractor.freeze()
+        # softcode size dict at some point 
+        layer_size_dict = {'input_after_preproc': 211,
+                            'conv1': 6784,
+                            'bn1': 6784,
+                            'conv1_relu1': 6784,
+                            'maxpool1': 3392,
+                            'layer1': 13568,
+                            'layer2': 13824,
+                            'layer3': 14336,
+                            'layer4': 14336,
+                            'avgpool': 2048,
+                            'final': 2048}
+        
+        proj_out_dim = layer_size_dict[layer_out]
         # init trainable word classifier  
-        if layer_out == 'avgpool':
-            proj_out_dim = config['model']['arch_kwargs']['proj_out_dim']
-        else:
-            ### TODO: adaptively compute output size 
-            proj_out_dim = 11111
         self.classifier = torch.nn.Linear(proj_out_dim,
                                           config['model']['arch_kwargs']['n_classes'])
         self.loss = nn.CrossEntropyLoss()
@@ -39,7 +52,13 @@ class SSLWordClassifier(L.LightningModule):
     def forward(self, x):
         with torch.no_grad():
             predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=True)
-            activations = all_outputs[self.layer_out].view(self.config['hparas']['batch_size'], -1)
+            activations = all_outputs[self.layer_out]
+
+            if self.layer_out == 'avgpool' or self.layer_out == 'final':
+                activations = activations.view(self.config['hparas']['batch_size'], -1)
+            else:
+                # time average then flatten
+                activations = activations.mean(dim=-1).view(self.config['hparas']['batch_size'], -1)
         x = self.classifier(activations)
         return x 
 
@@ -71,9 +90,20 @@ class SSLWordClassifier(L.LightningModule):
 
     def configure_optimizers(self):
         # Optimizer
-        opt = getattr(torch.optim, self.config['hparas']['optimizer'])
-        self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr'])     
-        # self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
+        if self.config['hparas']['optimizer'] == "LARS":
+            lr = self.config['hparas']['lr'] * self.config['hparas']['global_batch_size'] / 256
+            self.optimizer = LARS(
+                            self.classifier.parameters(),
+                            lr=lr,
+                            weight_decay=1e-6,
+                            momentum=0.9,
+                            weight_decay_filter=True,
+                            lars_adaptation_filter=True,
+                        ) 
+        else:
+            opt = getattr(torch.optim, self.config['hparas']['optimizer'])
+            self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr'])     
+            # self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
         return [self.optimizer] # , [self.schedule]
     
     def collate_fn(self, batch):
@@ -144,10 +174,10 @@ def cli_main(args):
 
     config['num_workers'] = args.num_workers
     config['hparas']['batch_size'] = args.batch_size
-    config['data']['eval_max'] = -1
-    config['hparas']['optimizer'] = "AdamW"
-    config['hparas']['lr'] = 0.0001
-    config['hparas']['epochs'] = 4
+    config['data']['eval_max'] = 3
+    config['hparas']['optimizer'] = "LARS"
+    config['hparas']['lr'] = 0.6
+    config['hparas']['epochs'] = 10
 
 
     # get checkpoint for ssl model 
@@ -175,22 +205,42 @@ def cli_main(args):
         ))
     callbacks.append(EarlyStopping(monitor="train_loss", mode="min"))
 
+    wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
+                               name=f"{config_path.stem}_word_classifier",
+                               group='word_classifier_transfer',
+                               project='cochdnn')
+
     trainer = L.Trainer(
         precision="32",
-        limit_val_batches=0,
+        # limit_val_batches=0,
         default_root_dir=args.model_ckpt_dir / config_path.stem,
         max_epochs=config['hparas']['epochs'],
         devices=args.gpus,
         accelerator="gpu", 
         gradient_clip_val=1, # clipt grad l2 norm to 1 
         profiler=None,
+        logger=wandb_logger,
         callbacks=callbacks)   
     
     # fit classifier 
     trainer.fit(module)
 
-    # run validation 
-    outputs = trainer.predict(module, module.val_dataloader(), return_predictions=True)
+    # run test 
+    test_dataset = jsinV3_precombined_all_signals(root=config['data']['root'],
+                                                 train=False,
+                                                 transform=None,
+                                                 batch_size=config['hparas']['batch_size'],
+                                                 eval_max=-1)
+    test_dataset.target_keys = ['signal/word_int']
+    test_dataloader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=1,
+        num_workers=self.config['num_workers'],
+        shuffle=False,
+        collate_fn=self.collate_fn
+    )
+
+    outputs = trainer.predict(module, test_dataloader, return_predictions=True)
     # get stats from test 
     output_vals = torch.cat([output['accuracy'] for output in outputs])
     n_examples = output_vals.shape[0]
