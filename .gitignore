@@ -24,6 +24,8 @@ ipython_config.py
 outLogs
 lightning_logs/
 esc_analysis
+wandb/*
+**/wandb/
 
 # data
 *.npy
@@ -41,4 +43,5 @@ esc_analysis
 *.svg
 *.pdf
 *.h5
-.hparams.yaml
+*.hparams.yaml
+*.log
