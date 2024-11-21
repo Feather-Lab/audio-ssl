@@ -80,7 +80,10 @@ class SSLWordClassifier(L.LightningModule):
         audio, labels = batch
         logits = self.forward(audio) 
         loss = self.loss(logits, labels)
+        accuracy = calculate_accuracy(logits.softmax(-1), labels, reduce=True)
+
         self.log(f"{step_type}_classifier_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True)
+        self.log(f"{step_type}_word_acc", accuracy, on_step=True, on_epoch=False, prog_bar=True)
         return loss 
     
     def training_step(self, batch, batch_idx):
@@ -189,9 +192,9 @@ def cli_main(args):
     config['num_workers'] = args.num_workers
     config['hparas']['batch_size'] = args.batch_size
     config['data']['eval_max'] = 3
-    config['hparas']['optimizer'] = "LARS"
-    config['hparas']['lr'] = 0.6
-    config['hparas']['epochs'] = 10
+    config['hparas']['optimizer'] = args.optimizer
+    config['hparas']['lr'] = args.lr * args.gpus
+    config['hparas']['epochs'] = 4
 
     if args.w_mlp:
         config['model']['classifier'] = {}
@@ -199,7 +202,6 @@ def cli_main(args):
         mlp_str = "_w_mlp"
     else:
         mlp_str = ""
-
 
     # get checkpoint for ssl model 
     if args.ckpt_path == "":
@@ -210,7 +212,8 @@ def cli_main(args):
     else:
         ckpt_path = args.ckpt_path
 
-    classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{config['hparas']['optimizer']}{mlp_str}"
+    str_modifier = f"{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}"
+    classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     module = SSLWordClassifier(config=config,
                            ckpt_path=ckpt_path,
@@ -218,16 +221,16 @@ def cli_main(args):
     callbacks=[]
     callbacks.append(ModelCheckpoint(
             classifier_checkpoint_dir,
-            monitor="train_loss",
+            monitor="train_classifier_loss",
             mode="min",
             save_top_k=1,
             save_weights_only=True,
             verbose=True,
         ))
-    callbacks.append(EarlyStopping(monitor="train_loss", mode="min"))
+    callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
 
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               name=f"{config_path.stem}_word_classifier_{config['hparas']['optimizer']}{mlp_str}",
+                               name=f"{config_path.stem}_word_classifier_{str_modifier}",
                                group='word_classifier_transfer',
                                project='cochdnn')
 
@@ -238,6 +241,8 @@ def cli_main(args):
         max_epochs=config['hparas']['epochs'],
         devices=args.gpus,
         accelerator="gpu", 
+        strategy='ddp' if args.gpus > 1 else 'auto',
+
         gradient_clip_val=1, # clipt grad l2 norm to 1 
         profiler=None,
         logger=wandb_logger,
@@ -256,9 +261,9 @@ def cli_main(args):
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=1,
-        num_workers=self.config['num_workers'],
+        num_workers=config['num_workers'],
         shuffle=False,
-        collate_fn=self.collate_fn
+        collate_fn=module.collate_fn
     )
 
     outputs = trainer.predict(module, test_dataloader, return_predictions=True)
@@ -320,6 +325,8 @@ if __name__ == "__main__":
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
     parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
+    parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
+    parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
 

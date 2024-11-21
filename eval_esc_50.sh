@@ -9,7 +9,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-3 #0-53 for current 
+#SBATCH --array=0#-3 #0-53 for current 
 
 # module load cuda cudnn nccl
 
@@ -49,14 +49,14 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                 --ckpt_path model_checkpoints/audioset_resnet50/checkpoints/epoch=4-step=37750-best_audioset_task.ckpt
 
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_06.yaml \
-#                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --ckpt_path model_checkpoints/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_06/checkpoints/epoch=8-step=33750.ckpt
-
-
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_list_path train_config_manifests/pilot_dualtask_learning_rate_barlow_768-batch-size.pkl \
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
                                    --model_ckpt_dir model_checkpoints \
-                                   --array_ix $SLURM_ARRAY_TASK_ID
+                                #    --ckpt_path model_checkpoints/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_06/checkpoints/epoch=8-step=33750.ckpt
+
+
+# python3 lightning_scripts/make_esc_pl_model_plots.py --config_list_path train_config_manifests/pilot_dualtask_learning_rate_barlow_768-batch-size.pkl \
+#                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID
 
