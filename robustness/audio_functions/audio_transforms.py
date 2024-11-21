@@ -589,3 +589,164 @@ class CombineWithRandomDBSNR(torch.nn.Module):
 
         return signal_in_noise, None
 
+### New transforms for matched data ###
+class RandomCrop(torch.nn.Module):
+    def __init__(self, crop_length):
+        super().__init__()
+        self.crop_length = crop_length
+
+    def __call__(self, x):
+        start_idx = np.random.randint(x.shape[0] - self.crop_length)
+        return x[start_idx:start_idx+self.crop_length]
+
+class CombineWithFixedDBSNR(torch.nn.Module):
+    """
+    Takes two signals and combines them at a specified dB SNR level.
+    
+    Returns:
+        signal_in_noise, None 
+
+    """
+    def __init__(self):
+        super(CombineWithFixedDBSNR, self).__init__()
+
+    def forward(self, foreground_wav, background_wav, rand_db_snr):
+        """
+        Args:  
+            foreground_wav (torch.Tensor): the waveform that will be used as
+                the foreground audio sample (usually speech)
+            background_wav (torch.Tensor): the waveform that will be used as 
+                the background audio sample
+        """
+        rms_ratio = np.power(10.0, rand_db_snr / 20.0)
+        # Demean signal and noise before computing rms
+        if foreground_wav is not None:
+            foreground_wav = ch_demean(foreground_wav)
+            rms_foreground = ch_rms(foreground_wav)
+        else:
+            rms_foreground = 0
+            foreground_wav = torch.zeros(background_wav.shape)
+        if background_wav is not None:
+            background_wav = ch_demean(background_wav)
+            rms_background = ch_rms(background_wav)
+        else:
+            rms_background = 0
+            background_wav = torch.zeros(foreground_wav.shape)
+
+        # Calculate the scale factor for the two sounds
+        # For now, to align with the jsinv3 dataset, we include the infinite SNR 
+        # cases
+        if rms_foreground == 0: # No foreground condition (just noise)
+            noise_scale_factor = 1
+        elif rms_background == 0: 
+            noise_scale_factor = 0
+        else:
+            noise_scale_factor = torch.div(rms_foreground, 
+                                           torch.mul(rms_background,
+                                                     rms_ratio))
+ 
+        background_wav = torch.mul(noise_scale_factor, background_wav)
+        signal_in_noise = torch.add(foreground_wav, background_wav)
+
+        return signal_in_noise
+
+class CombineWithRandomDBSNRWithParam(torch.nn.Module):
+    """
+    Takes two signals and combines them at a random dB SNR level, and returns 
+    the selected dB SNR level (along side the combined signal).
+    
+    Args: 
+        low_snr (float): the low end for the range of dB SNR to draw from
+        high_snr (float): the high end for the range of db SNR to draw from
+        rms_level (float): the end RMS value for the combined sound
+
+    Returns:
+        signal_in_noise, rand_db_snr 
+
+    """
+    def __init__(self, low_snr=-10, high_snr=10):
+        self.low_snr=low_snr
+        self.high_snr=high_snr
+        super(CombineWithRandomDBSNRWithParam, self).__init__()
+
+    def forward(self, foreground_wav, background_wav):
+        """
+        Args:  
+            foreground_wav (torch.Tensor): the waveform that will be used as
+                the foreground audio sample (usually speech)
+            background_wav (torch.Tensor): the waveform that will be used as 
+                the background audio sample
+        """
+        rand_db_snr = self.low_snr + (self.high_snr - self.low_snr) * torch.rand(1)
+        rms_ratio = np.power(10.0, rand_db_snr / 20.0)
+        # Demean signal and noise before computing rms
+        if foreground_wav is not None:
+            foreground_wav = ch_demean(foreground_wav)
+            rms_foreground = ch_rms(foreground_wav)
+        else:
+            rms_foreground = 0
+            foreground_wav = torch.zeros(background_wav.shape)
+        if background_wav is not None:
+            background_wav = ch_demean(background_wav)
+            rms_background = ch_rms(background_wav)
+        else:
+            rms_background = 0
+            background_wav = torch.zeros(foreground_wav.shape)
+
+        # Calculate the scale factor for the two sounds
+        # For now, to align with the jsinv3 dataset, we include the infinite SNR 
+        # cases
+        if rms_foreground == 0: # No foreground condition (just noise)
+            noise_scale_factor = 1
+        elif rms_background == 0: 
+            noise_scale_factor = 0
+        else:
+            noise_scale_factor = torch.div(rms_foreground, 
+                                           torch.mul(rms_background,
+                                                     rms_ratio))
+ 
+        background_wav = torch.mul(noise_scale_factor, background_wav)
+        signal_in_noise = torch.add(foreground_wav, background_wav)
+
+        return signal_in_noise, rand_db_snr
+
+
+class MatchedCombineWithRandomDBSNR(torch.nn.Module):
+    """
+    Combines two signals at the same random dB SNR level.
+    """
+    def __init__(self, low_db=-10, high_db=10):
+        super().__init__()
+        self.low_db = low_db
+        self.high_db = high_db
+        self.combiner_random = CombineWithRandomDBSNRWithParam(low_db, high_db)
+        self.combiner_fixed = CombineWithFixedDBSNR()
+    
+    def __call__(self, foreground_wav1, foreground_wav2, background_wav1, background_wav2):
+        combined_1, rand_db_snr = self.combiner_random(foreground_wav1, background_wav1)
+        combined_2 =  self.combiner_fixed(foreground_wav2, background_wav2, rand_db_snr)
+
+        return combined_1, combined_2
+
+class MatchedRandomSignalCrops(torch.nn.Module):
+    """
+    Randomly crops two signals to the same length, such that the word is in the same
+    position (as defined by the center of the word) in both signals.
+    """
+    def __init__(self, crop_length=40000):
+        super().__init__()
+        self.crop_length = crop_length
+
+    def __call__(self, signal_1, signal_2):
+        # assumes signal_1 is shorter than signal_2 (so crop_idx_1 is valid for signal_2)
+        if len(signal_1) > len(signal_2):
+            print('Warning: signal_1 is longer than signal_2 for matched Cropping')
+
+        start_idx_1 = np.random.randint(signal_1.shape[0] - self.crop_length)
+        cropped_1 = signal_1[start_idx_1:start_idx_1+self.crop_length]
+
+        # crop second signal so that the word is in the same start position
+        start_idx_2 = start_idx_1 + (len(signal_2) - len(signal_1)) // 2
+        cropped_2 = signal_2[start_idx_2:start_idx_2+self.crop_length]
+
+        return cropped_1, cropped_2
