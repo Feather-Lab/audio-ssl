@@ -3,16 +3,24 @@ import torch
 import glob
 import pickle
 import numpy as np
-# import psutil  # uncomment for tracking process in debug notebook 
+
+# import psutil  # uncomment for tracking process in debug notebook
+
 
 class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
     # Makes a dataset using pre-paired speech and audioset background sounds
-    # Works with hdf5 files for the jsinv3 dataset. As the authors for information on 
+    # Works with hdf5 files for the jsinv3 dataset. As the authors for information on
     # datafiles for training.
-    hdf5_glob = 'JSIN_all__run_*.h5'
-    target_keys = ['signal/word_int', 'signal/speaker_int', 'noise/labels_binary_via_int']
+    hdf5_glob = "JSIN_all__run_*.h5"
+    target_keys = [
+        "signal/word_int",
+        "signal/speaker_int",
+        "noise/labels_binary_via_int",
+    ]
 
-    def __init__(self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3):
+    def __init__(
+        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3
+    ):
         """
         Builds the pytorch hdf5 combined dataset from the files found in the
         specified root directory.
@@ -20,14 +28,19 @@ class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
         del download
 
         if train:
-            self.all_hdf5_files = glob.glob(root + '/train_*/' + self.hdf5_glob)
+            self.all_hdf5_files = glob.glob(root + "/train_*/" + self.hdf5_glob)
         else:
             if eval_max == -1:
-                self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)
             else:
-                self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)[0:eval_max]
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)[
+                    0:eval_max
+                ]
 
-        self.datasets = [H5Dataset(h5_file, transform, self.target_keys, batch_size) for h5_file in self.all_hdf5_files]
+        self.datasets = [
+            H5Dataset(h5_file, transform, self.target_keys, batch_size)
+            for h5_file in self.all_hdf5_files
+        ]
 
         super().__init__(self.datasets)
 
@@ -35,63 +48,82 @@ class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
         """
         Loads the mapping between the word IDX and human readable word map.
         """
-        word_and_speaker_encodings = pickle.load( open( "word_and_speaker_encodings_jsinv3.pckl", "rb" ))
-        class_map = word_and_speaker_encodings['word_idx_to_word']
+        word_and_speaker_encodings = pickle.load(
+            open("word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
         return class_map
 
 
 class jsinV3_precombined(torch.utils.data.ConcatDataset):
     # Makes a dataset using pre-paired speech and audioset background sounds
-    # Works with hdf5 files for the jsinv3 dataset. 
-    hdf5_glob = 'JSIN_all__run_*.h5'
-    target_keys = ['signal/word_int']
+    # Works with hdf5 files for the jsinv3 dataset.
+    hdf5_glob = "JSIN_all__run_*.h5"
+    target_keys = ["signal/word_int"]
 
-    def __init__(self, root, train=True, download=False, transform=None, batch_size=1, eval_max=8):
+    def __init__(
+        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=8
+    ):
         """
-        Builds the pytorch hdf5 combined dataset from the files found in the 
-        specified root directory. 
+        Builds the pytorch hdf5 combined dataset from the files found in the
+        specified root directory.
         """
         del download
 
         if train:
-            self.all_hdf5_files = glob.glob(root + '/train_*/' + self.hdf5_glob)
+            self.all_hdf5_files = glob.glob(root + "/train_*/" + self.hdf5_glob)
         else:
-            self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)[0:eval_max] # Just get one set of them
+            self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)[
+                0:eval_max
+            ]  # Just get one set of them
 
-        self.datasets = [H5Dataset(h5_file, transform, self.target_keys, batch_size) for h5_file in self.all_hdf5_files]
+        self.datasets = [
+            H5Dataset(h5_file, transform, self.target_keys, batch_size)
+            for h5_file in self.all_hdf5_files
+        ]
 
         super().__init__(self.datasets)
 
     def class_map(self):
         """
-        Loads the mapping between the word IDX and human readable word map. 
+        Loads the mapping between the word IDX and human readable word map.
         """
-        word_and_speaker_encodings = pickle.load( open( "word_and_speaker_encodings_jsinv3.pckl", "rb" )) 
-        class_map = word_and_speaker_encodings['word_idx_to_word']
+        word_and_speaker_encodings = pickle.load(
+            open("word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
         return class_map
+
 
 class jsinV3_precombined_paired_batched(torch.utils.data.ConcatDataset):
     # Makes a dataset using pre-paired speech and audioset background sounds
-    # Works with hdf5 files for the jsinv3 dataset. 
-    hdf5_glob = 'JSIN_all__run_*.h5'
-    target_keys = ['signal/word_int']
+    # Works with hdf5 files for the jsinv3 dataset.
+    hdf5_glob = "JSIN_all__run_*.h5"
+    target_keys = ["signal/word_int"]
 
-    def __init__(self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3):
+    def __init__(
+        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3
+    ):
         """
-        Builds the pytorch hdf5 combined dataset from the files found in the 
-        specified root directory. 
+        Builds the pytorch hdf5 combined dataset from the files found in the
+        specified root directory.
         """
         del download
 
         if train:
-            self.all_hdf5_files = glob.glob(root + '/train_*/' + self.hdf5_glob)
+            self.all_hdf5_files = glob.glob(root + "/train_*/" + self.hdf5_glob)
         else:
             if eval_max == -1:
-                self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)
             else:
-                self.all_hdf5_files = glob.glob(root + '/valid_*/' + self.hdf5_glob)[0:eval_max]
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)[
+                    0:eval_max
+                ]
 
-        self.datasets = [H5DatasetPairedBatched(h5_file, transform, self.target_keys, batch_size) for h5_file in self.all_hdf5_files]
+        self.datasets = [
+            H5DatasetPairedBatched(h5_file, transform, self.target_keys, batch_size)
+            for h5_file in self.all_hdf5_files
+        ]
 
         super().__init__(self.datasets)
         self.rotate_index = 0
@@ -99,14 +131,16 @@ class jsinV3_precombined_paired_batched(torch.utils.data.ConcatDataset):
     # def _rotate_splits(self):
     #     for dataset in self.datasets:
     #         dataset._rotate_splits()
-    #     self.rotate_index += 1 
+    #     self.rotate_index += 1
 
     def class_map(self):
         """
-        Loads the mapping between the word IDX and human readable word map. 
+        Loads the mapping between the word IDX and human readable word map.
         """
-        word_and_speaker_encodings = pickle.load( open( "word_and_speaker_encodings_jsinv3.pckl", "rb" )) 
-        class_map = word_and_speaker_encodings['word_idx_to_word']
+        word_and_speaker_encodings = pickle.load(
+            open("word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
         return class_map
 
 
@@ -123,34 +157,38 @@ class H5Dataset(torch.utils.data.Dataset):
         self.target_keys = target_keys
         self.batch_size = batch_size
 
-        # These TODOs are not implemented for the release. HDF5 files are 
-        # already shuffled, so we can run through them directly. 
+        # These TODOs are not implemented for the release. HDF5 files are
+        # already shuffled, so we can run through them directly.
         # TODO: implement chunking the hdf5 file so that we can shuffle the data
         # TODO: implement shuffling the audioset and the speech separately
         # self.chunk_size = hdf5_chunk_size
-        with h5py.File(self.file_path, 'r', swmr=True) as file:
-            self.dataset_len = len(file['sources']['signal']['signal']) // self.batch_size # scale by batch size for dataloader
+        with h5py.File(self.file_path, "r", swmr=True) as file:
+            self.dataset_len = (
+                len(file["sources"]["signal"]["signal"]) // self.batch_size
+            )  # scale by batch size for dataloader
 
     def __getitem__(self, index):
         """
         Gets components of the hdf5 file that are used for training
-        Args: 
+        Args:
             index (int): index into the hdf5 file
         Returns:
             [signal, target] : the training audio (signal) containing the preprocessing
               which may combine the foreground and background speech, and the target idx
-              specified by target_keys. 
+              specified by target_keys.
         """
         if self.dataset is None:
-            self.dataset = h5py.File(self.file_path, 'r', swmr=True)# ["ndarray_data"]["signal"]
-        # set up ix logic 
+            self.dataset = h5py.File(
+                self.file_path, "r", swmr=True
+            )  # ["ndarray_data"]["signal"]
+        # set up ix logic
         start = index * self.batch_size
         end = start + self.batch_size
 
-        # print(f"start ix: {start} on pid {psutil.Process().pid}") # uncomment for notebook print statements 
-        # Before transforms, set the signal and the noise 
-        signal = self.dataset['sources']['signal']['signal'][start:end]
-        noise = self.dataset['sources']['noise']['signal'][start:end]
+        # print(f"start ix: {start} on pid {psutil.Process().pid}") # uncomment for notebook print statements
+        # Before transforms, set the signal and the noise
+        signal = self.dataset["sources"]["signal"]["signal"][start:end]
+        noise = self.dataset["sources"]["noise"]["signal"][start:end]
 
         # Transforms will take in the signal and the noise source for this dataset
         # If no transform, just return the speech with no background
@@ -161,22 +199,26 @@ class H5Dataset(torch.utils.data.Dataset):
                 signals.append(signal_)
             signal = np.vstack(signals)
         if len(self.target_keys) == 1:
-            target_paths = self.target_keys[0].split('/')
-            target = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
-            if self.target_keys[0] == 'noise/labels_binary_via_int':
+            target_paths = self.target_keys[0].split("/")
+            target = self.dataset["sources"][target_paths[0]][target_paths[1]][
+                start:end
+            ]
+            if self.target_keys[0] == "noise/labels_binary_via_int":
                 target = target.astype(np.float32)
         # If there are multiple keys, our target has them explicitly listed
         else:
             target = {}
             for target_key in self.target_keys:
-                target_paths = target_key.split('/')
-                target[target_key] = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
-                if target_key == 'noise/labels_binary_via_int':
+                target_paths = target_key.split("/")
+                target[target_key] = self.dataset["sources"][target_paths[0]][
+                    target_paths[1]
+                ][start:end]
+                if target_key == "noise/labels_binary_via_int":
                     target[target_key] = target[target_key].astype(np.float32)
 
         if self.transform is None:
-            return signal, noise, target 
-        
+            return signal, noise, target
+
         return signal, target
 
     def __len__(self):
@@ -196,13 +238,13 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         self.target_keys = target_keys
         self.batch_size = batch_size
 
-        # These TODOs are not implemented for the release. HDF5 files are 
-        # already shuffled, so we can run through them directly. 
+        # These TODOs are not implemented for the release. HDF5 files are
+        # already shuffled, so we can run through them directly.
         # TODO: implement chunking the hdf5 file so that we can shuffle the data
         # TODO: implement shuffling the audioset and the speech separately
         # self.chunk_size = hdf5_chunk_size
-        with h5py.File(self.file_path, 'r', swmr=True) as file:
-            self.dataset_len = len(file['sources']['signal']['signal'])  
+        with h5py.File(self.file_path, "r", swmr=True) as file:
+            self.dataset_len = len(file["sources"]["signal"]["signal"])
         if self.dataset_len % 2 == 1:
             self.dataset_len -= 1
 
@@ -210,39 +252,42 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         all_indices = list(range(self.dataset_len))
         self.split_1 = all_indices[::2]
         self.split_2 = all_indices[1::2]
-        # scale dataset len after setting split indices 
-        self.dataset_len = self.dataset_len // self.batch_size  # scale by batch size for dataloader (accessed in len method)
+        # scale dataset len after setting split indices
+        self.dataset_len = (
+            self.dataset_len // self.batch_size
+        )  # scale by batch size for dataloader (accessed in len method)
 
     # def _rotate_splits(self):
     #     self.split_2 = self.split_2[1:] + self.split_2[:1]
     #     self.rotate_index += 1
 
-
     def __getitem__(self, index):
         """
         Gets components of the hdf5 file that are used for training
-        Args: 
+        Args:
             index (int): index into the hdf5 file
         Returns:
             [signal, target] : the training audio (signal) containing the preprocessing
               which may combine the foreground and background speech, and the target idx
-              specified by target_keys. 
+              specified by target_keys.
         """
 
-        #TODO: Re-write to shuffle within mini-batch 
+        # TODO: Re-write to shuffle within mini-batch
         # logic -> grab batch, shuffle, every 2 are paired
         if self.dataset is None:
-            self.dataset = h5py.File(self.file_path, 'r', swmr=True)# ["ndarray_data"]["signal"]
-      
-        # set up ix logic 
+            self.dataset = h5py.File(
+                self.file_path, "r", swmr=True
+            )  # ["ndarray_data"]["signal"]
+
+        # set up ix logic
         start = index * self.batch_size
         end = start + self.batch_size
 
         # get indices from start to end for signal and noise
-        signals = self.dataset['sources']['signal']['signal'][start:end]
-        noises = self.dataset['sources']['noise']['signal'][start:end]
+        signals = self.dataset["sources"]["signal"]["signal"][start:end]
+        noises = self.dataset["sources"]["noise"]["signal"][start:end]
 
-        # get random permutation of batch ixs assign signals to view 1 and 2. Will take second half of ixs as signal_2x 
+        # get random permutation of batch ixs assign signals to view 1 and 2. Will take second half of ixs as signal_2x
         permuted_batch_ixs = torch.randperm(self.batch_size)
         split_1, split_2 = torch.chunk(permuted_batch_ixs, 2)
         signal_1 = signals[split_1]
@@ -251,23 +296,27 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         noise_2 = noises[split_2]
 
         if len(self.target_keys) == 1:
-            target_paths = self.target_keys[0].split('/')
-            targets = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
+            target_paths = self.target_keys[0].split("/")
+            targets = self.dataset["sources"][target_paths[0]][target_paths[1]][
+                start:end
+            ]
             target_1 = targets[split_1]
             target_2 = targets[split_2]
-            if self.target_keys[0] == 'noise/labels_binary_via_int':
+            if self.target_keys[0] == "noise/labels_binary_via_int":
                 target_1 = target_1.astype(np.float32)
                 target_2 = target_2.astype(np.float32)
-                
+
         # If there are multiple keys, our target has them explicitly listed
         else:
             target_1, target_2 = {}, {}
             for target_key in self.target_keys:
-                target_paths = target_key.split('/')
-                targets = self.dataset['sources'][target_paths[0]][target_paths[1]][start:end]
+                target_paths = target_key.split("/")
+                targets = self.dataset["sources"][target_paths[0]][target_paths[1]][
+                    start:end
+                ]
                 target_1[target_key] = targets[split_1]
                 target_2[target_key] = targets[split_2]
-                if target_key == 'noise/labels_binary_via_int':
+                if target_key == "noise/labels_binary_via_int":
                     target_1[target_key] = target_1[target_key].astype(np.float32)
                     target_2[target_key] = target_2[target_key].astype(np.float32)
 
