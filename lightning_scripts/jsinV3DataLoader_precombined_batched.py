@@ -3,6 +3,8 @@ import torch
 import glob
 import pickle
 import numpy as np
+from robustness.audio_functions import audio_transforms
+import pandas as pd
 
 # import psutil  # uncomment for tracking process in debug notebook
 
@@ -324,3 +326,70 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.dataset_len // 2
+
+
+class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
+    def __init__(
+            self,
+            speech_h5_path,
+            noise_h5_path,
+            low_db=-10,
+            high_db=10,
+            batch_size=1,
+            transform=None,
+    ):
+        super().__init__()
+        self.speech_files = h5py.File(speech_h5_path, 'r')
+        self.noise_files = h5py.File(noise_h5_path, 'r')
+        self.speech_metadata = pd.read_hdf(speech_h5_path)
+        self.noise_metadata = pd.read_hdf(noise_h5_path)
+
+        self.num_noise_files = len(self.noise_metadata)
+        self.batch_size = batch_size
+
+        self.random_crop = audio_transforms.RandomCrop(40000)
+        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000)
+        self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
+    
+    def __len__(self):
+        return len(self.speech_metadata) // (2 * self.batch_size)
+    
+    def __getitem__(self, idx):
+        speech = self.speech_files['ndarray_data']['signal'][idx:idx + self.batch_size * 2]
+        noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
+        noise = self.noise_files['ndarray_data']['signal'][noise_idx:noise_idx + self.batch_size * 2]
+        
+        # shuffle the indices of speech and noise
+        speech = speech[np.random.permutation(speech.shape[0])]
+        noise = noise[np.random.permutation(noise.shape[0])]
+        
+        output_11, output_12, output_21, output_22 = [], [], [], []
+        for i in range(self.batch_size):
+            speech_1, speech_2 = speech[i * 2], speech[i * 2 + 1]
+            if len(speech_1) > len(speech_2):
+                speech_1, speech_2 = speech_2, speech_1
+            noise_1, noise_2 = self.random_crop(noise[0]), self.random_crop(noise[1])
+            noise_1, noise_2 = torch.tensor(noise_1), torch.tensor(noise_2)
+
+            # randomly crop clips to be the same length (2 seconds = 40000 samples)
+            cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)
+            cropped_12, cropped_22 = self.matched_random_crop(speech_1, speech_2)
+
+            cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
+            cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)
+
+            # randomly mix the speech and noise with the same DBSNR
+            combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
+            combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
+
+            output_11.append(combined_11)
+            output_12.append(combined_12)
+            output_21.append(combined_21)
+            output_22.append(combined_22)
+        
+        output_11 = torch.stack(output_11)
+        output_12 = torch.stack(output_12)
+        output_21 = torch.stack(output_21)
+        output_22 = torch.stack(output_22)
+
+        return output_11, output_12, output_21, output_22

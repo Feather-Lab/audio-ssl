@@ -3,6 +3,7 @@ import torch
 from torch import nn  
 from torchvision.models.resnet import resnet50
 from robustness.audio_models import resnet50 as resnet50_robusntess
+
 class SSLAudioModel(nn.Module):
     def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, n_classes=794, supervised=False, **kwargs):
         super().__init__()

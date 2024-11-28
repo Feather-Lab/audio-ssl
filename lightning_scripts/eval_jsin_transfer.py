@@ -20,16 +20,18 @@ torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+
 class SSLWordClassifier(L.LightningModule):
     def __init__(self, config, ckpt_path, layer_out):
         super().__init__()
         self.config = config
         self.layer_out = layer_out
         # init the pretrained LightningModule
-        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config).eval()
+        # Set strict to false to ignore loading in pre-trained classifier 
+        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
         self.feature_extractor = torch.compile(self.feature_extractor)
         self.feature_extractor.freeze()
-
+        self.task = config['data']['task_label'].split('/')[-1]
         # softcode size dict at some point 
         layer_size_dict = {'input_after_preproc': 211,
                             'conv1': 6784,
@@ -67,12 +69,11 @@ class SSLWordClassifier(L.LightningModule):
         with torch.no_grad():
             predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=True)
             activations = all_outputs[self.layer_out]
-
             if self.layer_out == 'avgpool' or self.layer_out == 'final':
-                activations = activations.view(self.config['hparas']['batch_size'], -1)
+                activations = activations.view(activations.shape[0], -1)
             else:
                 # time average then flatten
-                activations = activations.mean(dim=-1).view(self.config['hparas']['batch_size'], -1)
+                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
         x = self.classifier(activations)
         return x 
 
@@ -83,7 +84,7 @@ class SSLWordClassifier(L.LightningModule):
         accuracy = calculate_accuracy(logits.softmax(-1), labels, reduce=True)
 
         self.log(f"{step_type}_classifier_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True)
-        self.log(f"{step_type}_word_acc", accuracy, on_step=True, on_epoch=False, prog_bar=True)
+        self.log(f"{step_type}_{self.task}_acc", accuracy, on_step=True, on_epoch=False, prog_bar=True)
         return loss 
     
     def training_step(self, batch, batch_idx):
@@ -127,16 +128,20 @@ class SSLWordClassifier(L.LightningModule):
         batch = batch[0] # unbox wrapper added by dataloader 
         signals = []
         labels = batch[-1] # labels already collated 
+
         # convert labels to torch tensors 
         if isinstance(labels, dict):
             # hardcode selection of word labels 
-            labels = torch.from_numpy(labels['signal/word_int'])
+            labels = torch.from_numpy(labels[ self.config['data']['task_label']])
         else:
             labels = torch.from_numpy(labels) 
-        # convert signal and noise into signal
+        # Only fit on clean targets 
         for (signal, noise) in  zip(*batch[:2]):
-            # use transforms pre-defined in feature_extractor
-            signal, _ = self.feature_extractor.transforms(signal, noise)
+            # use transforms pre-defined in feature_extractor - None instead of noise to skip
+            signal, _ = self.feature_extractor.transforms(signal, None)
+            if signal is None:
+                # Signal was none & has null label class 
+                signal = torch.zeros(1,40000)
             signals.append(signal)
         signals = torch.cat(signals).unsqueeze(1) # add back channel dim
         return signals, labels  
@@ -147,7 +152,7 @@ class SSLWordClassifier(L.LightningModule):
                                                  train=True,
                                                  transform=None, # perform transforms in collate_fn
                                                  batch_size=self.config['hparas']['batch_size'])
-        dataset.target_keys = ['signal/word_int']
+        dataset.target_keys = [self.config['data']['task_label']]#  ['signal/word_int']
         self.train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
@@ -165,7 +170,7 @@ class SSLWordClassifier(L.LightningModule):
                                                  transform=None,
                                                  batch_size=self.config['hparas']['batch_size'],
                                                  eval_max=self.config['data'].get('eval_max', 3))
-        dataset.target_keys = ['signal/word_int']
+        dataset.target_keys = [self.config['data']['task_label']]#  ['signal/word_int']
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
@@ -195,6 +200,15 @@ def cli_main(args):
     config['hparas']['optimizer'] = args.optimizer
     config['hparas']['lr'] = args.lr * args.gpus
     config['hparas']['epochs'] = 4
+    # don't load in classifier head if it exists 
+    config['model']['arch_kwargs']['supervised'] =  False
+
+    if args.task == "word":
+        config['data']['task_label'] = 'signal/word_int'
+
+    elif args.task == "speaker":
+        config['data']['task_label'] = 'signal/speaker_int'
+        config['model']['arch_kwargs']['n_classes'] =  433
 
     if args.w_mlp:
         config['model']['classifier'] = {}
@@ -212,7 +226,7 @@ def cli_main(args):
     else:
         ckpt_path = args.ckpt_path
 
-    str_modifier = f"{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}"
+    str_modifier = f"{args.task}_clean_signals_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     module = SSLWordClassifier(config=config,
@@ -230,7 +244,7 @@ def cli_main(args):
     callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
 
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               name=f"{config_path.stem}_word_classifier_{str_modifier}",
+                               name=f"{config_path.stem}_classifier_{str_modifier}",
                                group='word_classifier_transfer',
                                project='cochdnn')
 
@@ -325,6 +339,7 @@ if __name__ == "__main__":
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
     parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
+    parser.add_argument('--task', default='word', type=str, help='One of: ["word", "speaker"]. Default is "word"')
     parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
