@@ -335,12 +335,13 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             noise_h5_path,
             low_db=-10,
             high_db=10,
+            db_spl=60,
             batch_size=1,
             transform=None,
     ):
         super().__init__()
-        self.speech_files = h5py.File(speech_h5_path, 'r')
-        self.noise_files = h5py.File(noise_h5_path, 'r')
+        self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
+        self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
         self.noise_metadata = pd.read_hdf(noise_h5_path)
 
@@ -350,7 +351,8 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000)
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
-    
+        self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+
     def __len__(self):
         return len(self.speech_metadata) // (2 * self.batch_size)
     
@@ -368,6 +370,9 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             speech_1, speech_2 = speech[i * 2], speech[i * 2 + 1]
             if len(speech_1) > len(speech_2):
                 speech_1, speech_2 = speech_2, speech_1
+            # if (noise[0].sum(0) == 0).any() or (noise[1].sum(0) == 0).any():
+                # print(idx, noise_idx)
+
             noise_1, noise_2 = self.random_crop(noise[0]), self.random_crop(noise[1])
             noise_1, noise_2 = torch.tensor(noise_1), torch.tensor(noise_2)
 
@@ -382,14 +387,21 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
             combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
 
+            # set dB SPL for mixtures 
+            combined_11, _ = self.set_dbSPL(combined_11, None)
+            combined_12, _ = self.set_dbSPL(combined_12, None)
+            combined_21, _ = self.set_dbSPL(combined_21, None)
+            combined_22, _ = self.set_dbSPL(combined_22, None)
+
             output_11.append(combined_11)
             output_12.append(combined_12)
             output_21.append(combined_21)
             output_22.append(combined_22)
         
-        output_11 = torch.stack(output_11)
-        output_12 = torch.stack(output_12)
-        output_21 = torch.stack(output_21)
-        output_22 = torch.stack(output_22)
+        output_11 = torch.stack(output_11).float()
+        output_12 = torch.stack(output_12).float()
+        output_21 = torch.stack(output_21).float()
+        output_22 = torch.stack(output_22).float()
+        
 
         return output_11, output_12, output_21, output_22

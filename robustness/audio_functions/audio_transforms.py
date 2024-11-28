@@ -596,8 +596,18 @@ class RandomCrop(torch.nn.Module):
         self.crop_length = crop_length
 
     def __call__(self, x):
-        start_idx = np.random.randint(x.shape[0] - self.crop_length)
-        return x[start_idx:start_idx+self.crop_length]
+        crop_bound = x.shape[0] - self.crop_length
+        if crop_bound < 0:
+            print(f"Warning: Crop upper bound {crop_bound} before start of signal of len ({x.shape[0]}), setting to 0")
+            start_idx = 0
+        else:
+            start_idx = np.random.randint(crop_bound)
+        x = x[start_idx:start_idx+self.crop_length]
+        # pad if x too short 
+        if len(x) < self.crop_length:
+            pad_dur = self.crop_length - len(x)
+            x = np.pad(x, (0, pad_dur), "constant", constant_values=0 )
+        return x
 
 class CombineWithFixedDBSNR(torch.nn.Module):
     """

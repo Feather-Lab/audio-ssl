@@ -13,6 +13,7 @@ from lightning.pytorch.callbacks import LearningRateMonitor
 
 from lightning_ssl import LitAudioSSL 
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
+from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -48,6 +49,8 @@ def cli_main(args):
     if 'ssl' in config_path.stem:
         if config['hparas'].get('sep_class_opt', False):
             module = LitAudioSSLSepClassOpt
+        elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+            module = LitAudioSSLMatched
         else:
             module = LitAudioSSL
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
