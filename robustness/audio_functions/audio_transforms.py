@@ -598,7 +598,7 @@ class RandomCrop(torch.nn.Module):
     def __call__(self, x):
         crop_bound = x.shape[0] - self.crop_length
         if crop_bound < 0:
-            print(f"Warning: Crop upper bound {crop_bound} before start of signal of len ({x.shape[0]}), setting to 0")
+            # print(f"Warning: Crop upper bound {crop_bound} before start of signal of len ({x.shape[0]}), setting to 0")
             start_idx = 0
         else:
             start_idx = np.random.randint(crop_bound)
