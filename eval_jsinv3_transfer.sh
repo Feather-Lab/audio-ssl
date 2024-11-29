@@ -41,13 +41,29 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --w_mlp --mlp_dim 512 \
 #                                    --optimizer "LARS" --lr 0.2
 
-srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "LARS" --lr 0.05
+
+srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
                                    --array_ix $SLURM_ARRAY_TASK_ID \
                                    --layer_str 'avgpool' \
                                    --optimizer "LARS" --lr 0.1
+
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "AdamW" --lr 0.0001
 
 
 

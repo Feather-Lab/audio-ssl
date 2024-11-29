@@ -35,9 +35,14 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+# srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+#                                   # --resume_training 
+
+srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
-                                   --resume_training 
+                                  # --resume_training 
 
 

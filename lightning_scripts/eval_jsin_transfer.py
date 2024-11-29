@@ -194,6 +194,9 @@ def cli_main(args):
     print(f"Evaluating config: {config_path}")
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
 
+    # update config for transfer learning task
+    config['data'] = {}
+    config['data']['root'] = "/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/"
     config['num_workers'] = args.num_workers
     config['hparas']['batch_size'] = args.batch_size
     config['data']['eval_max'] = 3
@@ -283,12 +286,15 @@ def cli_main(args):
     outputs = trainer.predict(module, test_dataloader, return_predictions=True)
     # get stats from test 
     output_vals = torch.cat([output['accuracy'] for output in outputs])
+    print("Output_vals")
+    print("\t", output_vals)
     n_examples = output_vals.shape[0]
     output_dict = {
             "mean_acc": output_vals.mean(),
             "std_acc" :output_vals.std(),
             "sem_acc": output_vals.std() / np.sqrt(n_examples)
         }   
+    print(output_dict)
     # save results as .pkl 
     results_dir = pathlib.Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)

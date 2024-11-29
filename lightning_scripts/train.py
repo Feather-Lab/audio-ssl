@@ -86,6 +86,14 @@ def cli_main(args):
             save_weights_only=True,
             verbose=True,
         ))
+        callbacks.append(ModelCheckpoint(
+            checkpoint_dir,
+            monitor="val_total_loss",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=True,
+            verbose=True,
+        ))
 
     else:
         module = LitWordAudioSetModel
