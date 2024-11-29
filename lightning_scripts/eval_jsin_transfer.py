@@ -221,15 +221,18 @@ def cli_main(args):
         mlp_str = ""
 
     # get checkpoint for ssl model 
+    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
     if args.ckpt_path == "":
-        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
         ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
         ckpt_path = ckpt_paths[-1] # get latest checkpoint 
         print(ckpt_path)
+        ckpt_modifier = ''
+
     else:
         ckpt_path = args.ckpt_path
+        ckpt_modifier = '_from_best_val_ckpt'
 
-    str_modifier = f"{args.task}_clean_signals_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}"
+    str_modifier = f"{args.task}_clean_signals_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}{ckpt_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     module = SSLWordClassifier(config=config,
