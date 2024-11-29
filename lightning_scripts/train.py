@@ -81,6 +81,7 @@ def cli_main(args):
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
             monitor="train_total_loss",
+            filename="{epoch}-{step}-best_train",
             mode="min",
             save_top_k=1,
             save_weights_only=True,
@@ -89,6 +90,7 @@ def cli_main(args):
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
             monitor="val_total_loss",
+            filename="{epoch}-{step}-best_val",
             mode="min",
             save_top_k=1,
             save_weights_only=True,
@@ -123,6 +125,7 @@ def cli_main(args):
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
             monitor="train_loss",
+            filename="{epoch}-{step}-best_train",
             mode="min",
             save_top_k=1,
             save_weights_only=True,
