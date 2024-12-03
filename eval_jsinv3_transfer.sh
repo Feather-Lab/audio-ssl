@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=48Gb
-#SBATCH --time=12:00:00
+#SBATCH --time=12:00:00 ## 6 hours if full, 12 minutes if eval only
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
@@ -38,8 +38,24 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --batch_size 192 \
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --layer_str 'avgpool' \
-#                                    --w_mlp --mlp_dim 512 \
 #                                    --optimizer "LARS" --lr 0.2
+#                                 #    --w_mlp --mlp_dim 512 \
+
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_02_LARS.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "LARS" --lr 0.1 --eval_only
+
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "LARS" --lr 0.1 --eval_only
 
 # srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
@@ -47,23 +63,30 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --batch_size 192 \
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --layer_str 'avgpool' \
-#                                    --optimizer "LARS" --lr 0.05
+#                                    --optimizer "AdamW" --lr 0.0001 --eval_only
 
-srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
-                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-                                   --model_ckpt_dir model_checkpoints \
-                                   --batch_size 192 \
-                                   --array_ix $SLURM_ARRAY_TASK_ID \
-                                   --layer_str 'avgpool' \
-                                   --optimizer "LARS" --lr 0.1
-
-# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS.yaml \
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --model_ckpt_dir model_checkpoints \
 #                                    --batch_size 192 \
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --layer_str 'avgpool' \
-#                                    --optimizer "AdamW" --lr 0.0001
+#                                    --optimizer "LARS" --lr 0.2 \
+#                                    --task "word" \
+#                                    --ckpt_path model_checkpoints/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched/checkpoints/epoch=24-step=7500-v1.ckpt \
+#                                    --eval_only
+
+# srun python3 lightning_scripts/eval_jsin_transfer.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --array_ix $SLURM_ARRAY_TASK_ID \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "AdamW" --lr 0.00001 \
+#                                    --task "word" \
+#                                    --ckpt_path model_checkpoints/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched/checkpoints/epoch=24-step=7500-v1.ckpt \
+#                                    --eval_only
+
 
 
 

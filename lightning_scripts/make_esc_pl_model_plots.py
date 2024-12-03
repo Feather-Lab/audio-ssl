@@ -739,8 +739,10 @@ if __name__ == '__main__':
         ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
         ckpt_path = ckpt_paths[-1] # get latest checkpoint 
         print(ckpt_path)
+        ckpt_str = ''
     else:
         ckpt_path = args.ckpt_path
+        ckpt_str = '_best_val_ckpt'
 
     if 'ssl' in config_path.stem:
         module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
@@ -755,7 +757,7 @@ if __name__ == '__main__':
     model = model.cuda()
     # net_path = os.getcwd()
     # net_name = '-'.join(net_path.split('/')[-2:])
-    net_name = config_path.stem # model name is stem of yaml config 
+    net_name = f"{config_path.stem}_{ckpt_str}" # model name is stem of yaml config 
     get_predictions_and_make_plots(model, net_name,
                                    scratch_activations_dir=args.SCRATCH_DIR,
                                    layer=metamer_layers[args.LAYER_IDX],

@@ -131,7 +131,7 @@ class SSLWordClassifier(L.LightningModule):
 
         # convert labels to torch tensors 
         if isinstance(labels, dict):
-            # hardcode selection of word labels 
+            #  selection of task labels 
             labels = torch.from_numpy(labels[ self.config['data']['task_label']])
         else:
             labels = torch.from_numpy(labels) 
@@ -152,7 +152,6 @@ class SSLWordClassifier(L.LightningModule):
                                                  train=True,
                                                  transform=None, # perform transforms in collate_fn
                                                  batch_size=self.config['hparas']['batch_size'])
-        dataset.target_keys = [self.config['data']['task_label']]#  ['signal/word_int']
         self.train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
@@ -170,7 +169,6 @@ class SSLWordClassifier(L.LightningModule):
                                                  transform=None,
                                                  batch_size=self.config['hparas']['batch_size'],
                                                  eval_max=self.config['data'].get('eval_max', 3))
-        dataset.target_keys = [self.config['data']['task_label']]#  ['signal/word_int']
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
@@ -201,8 +199,9 @@ def cli_main(args):
     config['hparas']['batch_size'] = args.batch_size
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
-    config['hparas']['lr'] = args.lr * args.gpus
-    config['hparas']['epochs'] = 4
+    # used 2 gpus for training, mult by 2 for now to get same checkpoint 
+    config['hparas']['lr'] = args.lr * 2 if args.eval_only else args.lr * args.gpus 
+    config['hparas']['epochs'] = 3
     # don't load in classifier head if it exists 
     config['model']['arch_kwargs']['supervised'] =  False
 
@@ -238,6 +237,17 @@ def cli_main(args):
     module = SSLWordClassifier(config=config,
                            ckpt_path=ckpt_path,
                            layer_out=args.layer_str)
+
+    ## Check if existing classifier_ckpt exists 
+    classifier_ckpts = list(classifier_checkpoint_dir.rglob("*.ckpt"))
+    classifier_ckpt = None 
+
+    if len(classifier_ckpts) > 0:
+        classifier_ckpts = sorted(classifier_ckpts, key=os.path.getctime)
+        classifier_ckpt = torch.load(classifier_ckpts[-1], weights_only=True) # get latest checkpoint 
+        module.load_state_dict(classifier_ckpt['state_dict'])
+        print(f"Loaded classifier from {classifier_ckpts[-1]}")
+
     callbacks=[]
     callbacks.append(ModelCheckpoint(
             classifier_checkpoint_dir,
@@ -268,8 +278,10 @@ def cli_main(args):
         logger=wandb_logger,
         callbacks=callbacks)   
     
-    # fit classifier 
-    trainer.fit(module)
+    # train classifier if we haven't already, or if overwriting 
+    if not classifier_ckpt or args.overwrite_classifier:
+        # fit classifier 
+        trainer.fit(module)
 
     # run test 
     test_dataset = jsinV3_precombined_all_signals(root=config['data']['root'],
@@ -277,7 +289,7 @@ def cli_main(args):
                                                  transform=None,
                                                  batch_size=config['hparas']['batch_size'],
                                                  eval_max=-1)
-    test_dataset.target_keys = ['signal/word_int']
+
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=1,
@@ -285,7 +297,7 @@ def cli_main(args):
         shuffle=False,
         collate_fn=module.collate_fn
     )
-
+    print("Running inference")
     outputs = trainer.predict(module, test_dataloader, return_predictions=True)
     # get stats from test 
     output_vals = torch.cat([output['accuracy'] for output in outputs])
@@ -301,7 +313,7 @@ def cli_main(args):
     # save results as .pkl 
     results_dir = pathlib.Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_filename = results_dir / f"{config_path.stem}_linear_eval_jsin.pkl"
+    results_filename = results_dir / f"{config_path.stem}_linear_eval_jsin_{str_modifier}.pkl"
     with open(results_filename, 'wb') as handle:
         pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
                        
@@ -352,6 +364,8 @@ if __name__ == "__main__":
     parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
+    parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
+    parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
 
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')

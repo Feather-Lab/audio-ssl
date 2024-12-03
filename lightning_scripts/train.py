@@ -10,6 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 from argparse import ArgumentParser
 from lightning_classifier import LitWordAudioSetModel
 from lightning.pytorch.callbacks import LearningRateMonitor
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 
 from lightning_ssl import LitAudioSSL 
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
@@ -96,7 +97,7 @@ def cli_main(args):
             save_weights_only=True,
             verbose=True,
         ))
-
+        val_loss_to_stop_on = "val_total_loss"
     else:
         module = LitWordAudioSetModel
         config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
@@ -131,6 +132,7 @@ def cli_main(args):
             save_weights_only=True,
             verbose=True,
         ))
+        val_loss_to_stop_on = "val_loss"
 
 
     ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
@@ -149,6 +151,9 @@ def cli_main(args):
                                version=config_path.stem,
                                project='cochdnn')
 
+    # Early stopping to save compute
+    # if val loss does not improve by 0.1 for 3 epochs (default), end training 
+    callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.1))
 
     grad_clip = config['hparas'].get('gradient_clip_val', 1) if not config['hparas'].get('sep_class_opt', False) else False
     trainer = L.Trainer(
