@@ -27,10 +27,16 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --model_ckpt_dir model_checkpoints \
 #                                 #    --ckpt_path model_checkpoints/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_06/checkpoints/epoch=8-step=33750.ckpt
 
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+#                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --ckpt_path model_checkpoints/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched/checkpoints/epoch=31-step=9600-v1.ckpt
+
+
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
                                    --model_ckpt_dir model_checkpoints \
-                                   --ckpt_path model_checkpoints/pilot_ssl_barlow_dualtask_resnet50_hparam_set_13_lr_06_LARS_MatchedSpeechInNoiseDatasetBatched/checkpoints/epoch=31-step=9600-v1.ckpt
+                                   --ckpt_path model_checkpoints/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched/checkpoints/epoch=8-step=2700.ckpt
 
 
 # python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/pilot_ssl_barlow_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
