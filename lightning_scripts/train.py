@@ -8,10 +8,11 @@ import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from argparse import ArgumentParser
-from lightning_classifier import LitWordAudioSetModel
 from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 
+from lightning_classifier import LitWordAudioSetModel
+from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning_ssl import LitAudioSSL 
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
@@ -99,7 +100,10 @@ def cli_main(args):
         ))
         val_loss_to_stop_on = "val_total_loss"
     else:
-        module = LitWordAudioSetModel
+        if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+            module = LitWordAudioSetModelMatched
+        else:
+            module = LitWordAudioSetModel
         config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
 
         if isinstance(config['val_metric'], dict):

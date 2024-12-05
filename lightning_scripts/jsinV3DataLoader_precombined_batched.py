@@ -338,6 +338,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             db_spl=60,
             batch_size=1,
             transform=None,
+            target_keys=None
     ):
         super().__init__()
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
@@ -347,11 +348,22 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
 
         self.num_noise_files = len(self.noise_metadata)
         self.batch_size = batch_size
-
+        self.target_keys = target_keys
+    
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000)
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+
+    def class_map(self):
+        """
+        Loads the mapping between the word IDX and human readable word map.
+        """
+        word_and_speaker_encodings = pickle.load(
+            open("/mnt/home/igriffith/ceph/projects/cochdnn/robustness/audio_functions/word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
+        return class_map, word_and_speaker_encodings
 
     def __len__(self):
         return len(self.speech_metadata) // (2 * self.batch_size)
@@ -361,21 +373,53 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
         noise = self.noise_files['ndarray_data']['signal'][noise_idx:noise_idx + self.batch_size * 2]
         
-        # shuffle the indices of speech and noise
-        speech = speech[np.random.permutation(speech.shape[0])]
-        noise = noise[np.random.permutation(noise.shape[0])]
+        # shuffle the indices of speech and noise - externalize for label ix-ing
+        speech_ixs = np.random.permutation(speech.shape[0])
+        noise_ixs = np.random.permutation(noise.shape[0])
         
         output_11, output_12, output_21, output_22 = [], [], [], []
+
+        if self.target_keys:
+            # track labels of each combo 
+            target_11 = {}
+            target_12 = {}
+            target_21 = {}
+            target_22 = {}
+            
+            for target_key in self.target_keys:
+                for target_set in [target_11, target_12, target_21, target_22]:
+                    target_set[target_key] = []
+                
         for i in range(self.batch_size):
-            speech_1, speech_2 = speech[i * 2], speech[i * 2 + 1]
+            # map batch ix to shuffle ix to make label alignment easy
+            speech_1_ix, speech_2_ix = speech_ixs[i * 2], speech_ixs[i * 2 + 1]
+            noise_1_ix, noise_2_ix = noise_ixs[i * 2] , noise_ixs[i * 2 + 1]
+            # get speech example
+            speech_1, speech_2 = speech[speech_1_ix], speech[speech_2_ix]
             if len(speech_1) > len(speech_2):
                 speech_1, speech_2 = speech_2, speech_1
-            # if (noise[0].sum(0) == 0).any() or (noise[1].sum(0) == 0).any():
-                # print(idx, noise_idx)
+                # track ix swap for labeling 
+                speech_1_ix, speech_2_ix = speech_2_ix, speech_1_ix
 
-            noise_1, noise_2 = self.random_crop(noise[0]), self.random_crop(noise[1])
+            # get noise example 
+            noise_1, noise_2 = self.random_crop(noise[noise_1_ix]), self.random_crop(noise[noise_2_ix])
             noise_1, noise_2 = torch.tensor(noise_1), torch.tensor(noise_2)
 
+            # store labels if supervised
+            if self.target_keys:
+                for target_key in self.target_keys:
+                    target_type, target_name = target_key.split("/")
+                    if target_type == 'signal':
+                        target_11[target_key].append(self.speech_metadata.loc[speech_1_ix, target_name].item())
+                        target_12[target_key].append(self.speech_metadata.loc[speech_1_ix, target_name].item())
+                        target_21[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
+                        target_22[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
+                    elif target_type == 'noise':
+                        target_11[target_key].append(self.noise_metadata.loc[noise_1_ix, target_name])
+                        target_12[target_key].append(self.noise_metadata.loc[noise_2_ix, target_name])
+                        target_21[target_key].append(self.noise_metadata.loc[noise_1_ix, target_name])
+                        target_22[target_key].append(self.noise_metadata.loc[noise_2_ix, target_name])
+            
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)
             cropped_12, cropped_22 = self.matched_random_crop(speech_1, speech_2)
@@ -403,5 +447,19 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         output_21 = torch.stack(output_21).float()
         output_22 = torch.stack(output_22).float()
         
+        # format targets 
+        for target in [target_11, target_12, target_21 , target_22]:
+            for target_key, target_list in target.items():
+                if 'noise' in target_key:
+                    # convert ragged list to binary vectors for audioset task
+                    label_ixs_int = torch.zeros(self.batch_size, 517) # don't need to double batch size here 
+                    for noise_label_ix, noise_labels in enumerate(target_list):
+                        label_ixs_int[noise_label_ix, noise_labels] = 1. 
+                    target[target_key] = label_ixs_int
+                else:
+                    target[target_key] = torch.tensor(target_list)
+    
+        if self.target_keys:
+            return output_11, output_12, output_21, output_22, target_11, target_12, target_21 , target_22
 
         return output_11, output_12, output_21, output_22
