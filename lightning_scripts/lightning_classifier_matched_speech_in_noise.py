@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import lightning as L
 
 import sys
+sys.path.append('./lightning_scripts/')
 import robustness.audio_models as architectures
 import robustness.audio_functions.audio_transforms as at 
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
@@ -48,66 +49,47 @@ class LitWordAudioSetModel(L.LightningModule):
             'avgpool',
             'final/signal/word_int',
             'final/signal/speaker_int',
-            'final/noise/labels_binary_via_int',
+            'final/noise/labels_int',
         ]
 
         self.model = ModelWithFrontEnd(self.audio_rep, self.model)
 
     
         self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
-                                                      batch_size=config['hparas']['batch_size']//4)
+                                                      batch_size=None,
+                                                    #   reduction='none'
+                                                    )
+
         # get accuracy metrics per task - requires module dict for torchmetrics 
-        self.train_accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'binary' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
+        self.train_accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
                         for task_key,num_classes in self.config['model']['arch_params']['num_classes'].items()}) 
         
-        self.val_accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'binary' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
+        self.val_accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
                         for task_key,num_classes in self.config['model']['arch_params']['num_classes'].items()}) 
         
         self.accuracy = {'train': self.train_accuracy, 'val': self.val_accuracy}
 
     def _step(self, batch, batch_idx, step_type):
-        spec_11, spec_12, spec_21, spec_22, target_11, target_12, target_21 , target_22 = batch 
-        ## Permute dims (1, batch, time) -> (batch, 1, time)
-        spec_11 = spec_11.permute(1,0,2)
-        spec_12 = spec_12.permute(1,0,2)
-        spec_21 = spec_21.permute(1,0,2)
-        spec_22 = spec_22.permute(1,0,2)
+        audio, label_dict = batch
 
         # logits will be dict - keys for each task
-        logits_11 = self.model(spec_11)
-        logits_12 = self.model(spec_12)
-        logits_21 = self.model(spec_21)
-        logits_22 = self.model(spec_22)
+        logits = self.model(audio)
+
+        # get classification loss
+        loss, task_loss_dict = self.multi_task_loss(logits, label_dict, return_indiv_loss=True)
+        self.log(f"{step_type}_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
         
-        # get classification loss for each set
-        total_loss = 0. 
-        total_task_loss_dict = {task_key:0 for task_key in logits_11.keys()}
-        total_task_acc_dict = {task_key:0 for task_key in logits_11.keys()}
-        
-        for logits, label_dict in zip([logits_11, logits_12, logits_21, logits_22], [target_11, target_12, target_21 , target_22]):
-            for task, labels in label_dict.items():
-                # remove extra dims from labels
-                label_dict[task] = labels.squeeze()
-            loss, task_loss_dict = self.multi_task_loss(logits, label_dict, return_indiv_loss=True)
-            total_loss += loss 
+        # calc acc, add acc and task loss to log
+        for task, task_loss in task_loss_dict.items():
+            task_acc = self.accuracy[step_type][task](logits[task], label_dict[task])
+            # format task str for logging: remove 'noise/' or 'signal/' from str
+            self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_{task}_acc", task_acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        # log current learning rate 
+        lr = self.schedule.get_last_lr()[0]
+        self.log(f"lr", lr, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
-            # update task loss and task accuracy per combination 
-            for task in task_loss_dict.keys():
-                total_task_loss_dict[task] += task_loss_dict[task]
-                total_task_acc_dict[task] += self.accuracy[step_type][task](logits[task], label_dict[task])
-
-        # add task loss to log
-        for task, total_task_loss in total_task_loss_dict.items():
-            total_task_loss = total_task_loss.detach() / 4.  # account for each batch 
-            self.log(f"{step_type}_{task}_loss", total_task_loss, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-            task_acc = total_task_acc_dict[task] / 4
-            self.log(f"{step_type}_{task}_acc", task_acc, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
-
-        total_loss = total_loss / 4. 
-        self.log(f"{step_type}_loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-  
-
-        return total_loss
+        return loss
 
     def training_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "train")
@@ -117,13 +99,30 @@ class LitWordAudioSetModel(L.LightningModule):
     
     def test_step(self, batch, batch_idx):
         return self._step(batch, batch_idx, "test")
-
+    
+    def on_before_optimizer_step(self, _):
+        def _get_grad_norm(params, scale=1):
+            """Compute grad norm given a gradient scale."""
+            total_norm = 0.0
+            for p in params:
+                if p.grad is not None:
+                    param_norm = (p.grad.detach().data / scale).norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm**0.5
+            return total_norm
+        grad_norm = _get_grad_norm(self.model.parameters())
+        self.log("grad_norm", torch.tensor(grad_norm), prog_bar=True, on_step=True, on_epoch=False)
+    
     def configure_optimizers(self):
         # Optimizer
         opt = getattr(torch.optim, self.config['hparas']['optimizer'])
         self.optimizer = opt(self.model.parameters(), lr=self.config['hparas']['lr'])     
         self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
-        return [self.optimizer], [self.schedule]
+              
+        return [self.optimizer],   {
+                    'scheduler': self.schedule,  # The LR scheduler instance (required)
+                    'interval': 'epoch',  # The unit of the scheduler's step size
+                }
 
     def forward(self, x):
         """
@@ -137,21 +136,13 @@ class LitWordAudioSetModel(L.LightningModule):
         return self.model(x)
 
     def collate_fn(self, batch):
-        batch = batch[0] # unbox wrapper added by dataloader 
-        signals = []
-        labels = batch[-1] # labels already collated 
-        # convert labels to torch tensors 
-        if isinstance(labels, dict):
-            for task_key, task_labels in labels.items():
-                labels[task_key] = torch.from_numpy(task_labels)
-        else:
-            labels = torch.from_numpy(labels) 
-        # convert signal and noise into signal
-        for (signal, noise) in  zip(*batch[:2]):
-            signal, _ = self.transforms(signal, noise)
-            signals.append(signal)
-        signals = torch.cat(signals).unsqueeze(1) # add back channel dim
-        return signals, labels 
+        audio, targets = batch[0] # is [comb11, comb12, comb21, comb22], [targ11, targ12, targ21, targ22]
+        audio = torch.vstack(audio).unsqueeze(1)
+        # # combine labels: each target is dict for each key, stack the values 
+        labels = {}
+        for label_key in targets[0].keys():
+            labels[label_key] = torch.concat([label_set[label_key] for label_set in targets])
+        return audio, labels
 
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
@@ -162,6 +153,7 @@ class LitWordAudioSetModel(L.LightningModule):
                                                      db_spl=self.config['audio_transforms']['dbspl'],
                                                      batch_size=self.config['hparas']['batch_size'],
                                                      target_keys=self.config['data']['target_keys'],
+                                                     overfit=self.config['data'].get('overfit', False)
                                                      )
         
         train_dataloader = torch.utils.data.DataLoader(
@@ -171,6 +163,7 @@ class LitWordAudioSetModel(L.LightningModule):
             pin_memory=True,
             # persistent_workers=True,
             shuffle=False,
+            collate_fn=self.collate_fn,
         )
         return train_dataloader
     
@@ -189,6 +182,8 @@ class LitWordAudioSetModel(L.LightningModule):
             batch_size=1,
             num_workers=self.config['num_workers'],
             shuffle=False,
+            collate_fn=self.collate_fn,
+
         )
         return dataloader
 

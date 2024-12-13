@@ -21,23 +21,23 @@ val_metric:
     audioset_task: 'val_noise/labels_int_acc'
 
 hparas:                                   # Experiment hyper-parameters
-  epochs: 250                             
-  batch_size: 768                        
-
+  epochs: 150                              
+  batch_size: 48                         # using Matched dataset - global batch size is 4x this (768 if 192)
+  # global_batch_size: 128                  # is real global batch size 
   step_lr: 50                              
   optimizer: "AdamW"
-  lr: 0.001                                 # initial LR 
+  lr: 0.1                                 # initial LR 
   valid_step: 5000
   task_loss_params:
     signal/word_int:
       loss_type: 'crossentropyloss'
-      weight: 1.0
+      weight: 1.0                         # init loss is ~6.6 
     noise/labels_int:
       loss_type: 'bcewithlogitsloss'
-      weight: 300.0
+      weight: 300.0                        # init loss is ~200 
     signal/speaker_int:
       loss_type: 'crossentropyloss'
-      weight: 0.25
+      weight: 0.25                        # init loss is ~1.65
 
 model:                                    # Model architecture
   arch_name: "resnet_multi_task18"

@@ -152,12 +152,12 @@ def cli_main(args):
     callbacks.append(lr_monitor)
     
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               version=config_path.stem,
+                               version=config_path.stem + '_v01',
                                project='cochdnn')
 
     # Early stopping to save compute
     # if val loss does not improve by 0.1 for 3 epochs (default), end training 
-    callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.1))
+    # callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.1))
 
     grad_clip = config['hparas'].get('gradient_clip_val', 1) if not config['hparas'].get('sep_class_opt', False) else False
     trainer = L.Trainer(

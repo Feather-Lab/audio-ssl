@@ -338,14 +338,18 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             db_spl=60,
             batch_size=1,
             transform=None,
-            target_keys=None
+            target_keys=None,
+            overfit=False,
     ):
         super().__init__()
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
         self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
-        self.noise_metadata = pd.read_hdf(noise_h5_path)
+        if overfit:
+            self.speech_metadata = self.speech_metadata.iloc[:100]
 
+        self.noise_metadata = pd.read_hdf(noise_h5_path)
+        self.overfit = overfit
         self.num_noise_files = len(self.noise_metadata)
         self.batch_size = batch_size
         self.target_keys = target_keys
@@ -454,12 +458,12 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                     # convert ragged list to binary vectors for audioset task
                     label_ixs_int = torch.zeros(self.batch_size, 517) # don't need to double batch size here 
                     for noise_label_ix, noise_labels in enumerate(target_list):
-                        label_ixs_int[noise_label_ix, noise_labels] = 1. 
+                        label_ixs_int[noise_label_ix, noise_labels ] = 1. 
                     target[target_key] = label_ixs_int
                 else:
                     target[target_key] = torch.tensor(target_list)
     
         if self.target_keys:
-            return output_11, output_12, output_21, output_22, target_11, target_12, target_21 , target_22
+            return [output_11, output_12, output_21, output_22], [target_11, target_12, target_21 , target_22]
 
         return output_11, output_12, output_21, output_22
