@@ -11,11 +11,13 @@ from argparse import ArgumentParser
 from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 
+#TODO: Make below a module dict that can import right lightning module from config 
 from lightning_classifier import LitWordAudioSetModel
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning_ssl import LitAudioSSL 
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
+from lightning_ssl_imagenet import LitImageSSL 
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -48,8 +50,11 @@ def cli_main(args):
 
     # get task-specific inits 
     callbacks = []
-    if 'ssl' in config_path.stem:
-        if config['hparas'].get('sep_class_opt', False):
+    if 'ssl' in config_path.stem or 'imagenet':
+        if 'imagenet' in config_path.stem:
+            module = LitImageSSL
+        
+        elif config['hparas'].get('sep_class_opt', False):
             module = LitAudioSSLSepClassOpt
         elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
             module = LitAudioSSLMatched
@@ -66,6 +71,7 @@ def cli_main(args):
                                 checkpoint_dir,
                                 monitor=f"{metric}",
                                 mode=config['val_metric_mode'],
+                                filename="{epoch}-{step}-best_val",
                                 save_top_k=1,
                                 save_weights_only=True,
                                 verbose=True,
@@ -75,6 +81,7 @@ def cli_main(args):
                             checkpoint_dir,
                             monitor=f"{config['val_metric']}",
                             mode=config['val_metric_mode'],
+                            filename="{epoch}-{step}-best_val",
                             save_top_k=1,
                             save_weights_only=True,
                             verbose=True,
@@ -86,16 +93,16 @@ def cli_main(args):
             filename="{epoch}-{step}-best_train",
             mode="min",
             save_top_k=1,
-            save_weights_only=True,
+            save_weights_only=False,
             verbose=True,
         ))
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
-            monitor="val_total_loss",
+            monitor="val_class_loss" if 'imagenet' in config_path.stem else 'val_total_loss',
             filename="{epoch}-{step}-best_val",
-            mode="min",
+            mode= "min",
             save_top_k=1,
-            save_weights_only=True,
+            save_weights_only=False,
             verbose=True,
         ))
         val_loss_to_stop_on = "val_total_loss"
