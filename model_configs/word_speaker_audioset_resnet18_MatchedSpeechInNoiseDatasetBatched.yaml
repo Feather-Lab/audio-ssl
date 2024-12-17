@@ -22,8 +22,7 @@ val_metric:
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 150                              
-  batch_size: 48                         # using Matched dataset - global batch size is 4x this (768 if 192)
-  # global_batch_size: 128                  # is real global batch size 
+  batch_size: 48                         # using Matched dataset - true global batch size is 4x this (e.g. 768 if 192)
   step_lr: 50                              
   optimizer: "AdamW"
   lr: 0.1                                 # initial LR 
@@ -43,7 +42,7 @@ model:                                    # Model architecture
   arch_name: "resnet_multi_task18"
   arch_params:
     num_classes:
-      signal/word_int: 794
-      signal/speaker_int: 433
-      noise/labels_int: 517
+      signal/word_int: 794               # TODO: -1 from this if not using null
+      signal/speaker_int: 433            # TODO: -1 from this if not using null
+      noise/labels_int: 517              # TODO: -1 from this if not using null
     pretrained: False

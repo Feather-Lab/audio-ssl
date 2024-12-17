@@ -345,11 +345,11 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
         self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
-        if overfit:
-            self.speech_metadata = self.speech_metadata.iloc[:100]
+        self.speech_metadata = self.speech_metadata.dropna() ## Removes null label 
 
         self.noise_metadata = pd.read_hdf(noise_h5_path)
-        self.overfit = overfit
+        self.noise_metadata = self.noise_metadata.dropna() ## Removes null label 
+
         self.num_noise_files = len(self.noise_metadata)
         self.batch_size = batch_size
         self.target_keys = target_keys
@@ -419,10 +419,10 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                         target_21[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
                         target_22[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
                     elif target_type == 'noise':
-                        target_11[target_key].append(self.noise_metadata.loc[noise_1_ix, target_name])
-                        target_12[target_key].append(self.noise_metadata.loc[noise_2_ix, target_name])
-                        target_21[target_key].append(self.noise_metadata.loc[noise_1_ix, target_name])
-                        target_22[target_key].append(self.noise_metadata.loc[noise_2_ix, target_name])
+                        target_11[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_1_ix])
+                        target_12[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_2_ix])
+                        target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_1_ix])
+                        target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_2_ix])
             
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)
@@ -455,11 +455,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         for target in [target_11, target_12, target_21 , target_22]:
             for target_key, target_list in target.items():
                 if 'noise' in target_key:
-                    # convert ragged list to binary vectors for audioset task
-                    label_ixs_int = torch.zeros(self.batch_size, 517) # don't need to double batch size here 
-                    for noise_label_ix, noise_labels in enumerate(target_list):
-                        label_ixs_int[noise_label_ix, noise_labels ] = 1. 
-                    target[target_key] = label_ixs_int
+                    target[target_key] = torch.from_numpy(np.stack(target_list, axis=0)).float()
                 else:
                     target[target_key] = torch.tensor(target_list)
     

@@ -83,11 +83,13 @@ class LitWordAudioSetModel(L.LightningModule):
         for task, task_loss in task_loss_dict.items():
             task_acc = self.accuracy[step_type][task](logits[task], label_dict[task])
             # format task str for logging: remove 'noise/' or 'signal/' from str
-            self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-            self.log(f"{step_type}_{task}_acc", task_acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_{task}_acc", task_acc, on_step=True if step_type == 'train' else False,
+                                                          on_epoch=False if step_type == 'train' else True,
+                                                          prog_bar=True, sync_dist=True)
         # log current learning rate 
         lr = self.schedule.get_last_lr()[0]
-        self.log(f"lr", lr, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f"lr", lr, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
         return loss
 
@@ -112,7 +114,7 @@ class LitWordAudioSetModel(L.LightningModule):
             return total_norm
         grad_norm = _get_grad_norm(self.model.parameters())
         self.log("grad_norm", torch.tensor(grad_norm), prog_bar=True, on_step=True, on_epoch=False)
-    
+
     def configure_optimizers(self):
         # Optimizer
         opt = getattr(torch.optim, self.config['hparas']['optimizer'])
