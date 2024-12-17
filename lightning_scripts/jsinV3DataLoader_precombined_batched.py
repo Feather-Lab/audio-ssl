@@ -451,15 +451,15 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         output_21 = torch.stack(output_21).float()
         output_22 = torch.stack(output_22).float()
         
-        # format targets 
-        for target in [target_11, target_12, target_21 , target_22]:
-            for target_key, target_list in target.items():
-                if 'noise' in target_key:
-                    target[target_key] = torch.from_numpy(np.stack(target_list, axis=0)).float()
-                else:
-                    target[target_key] = torch.tensor(target_list)
-    
         if self.target_keys:
+            # format targets 
+            for target in [target_11, target_12, target_21 , target_22]:
+                for target_key, target_list in target.items():
+                    if 'noise' in target_key:
+                        target[target_key] = torch.from_numpy(np.stack(target_list, axis=0)).float()
+                    else:
+                        target[target_key] = torch.tensor(target_list)
+        
             return [output_11, output_12, output_21, output_22], [target_11, target_12, target_21 , target_22]
 
         return output_11, output_12, output_21, output_22
