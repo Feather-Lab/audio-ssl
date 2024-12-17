@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=16
 
-#SBATCH --mem=128Gb
+#SBATCH --mem=200Gb
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
