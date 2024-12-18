@@ -598,8 +598,11 @@ class RandomCrop:
         crop_bound = x.shape[0] - self.crop_length
         if crop_bound < 0:
             # edge pad if x is too short 
-            pad_dur = (self.crop_length - len(x)) // 2
+            pad_dur = (self.crop_length - len(x)) // 2 + 1 
+            # print(f"X shape before pad: {x.shape}")
             x = np.pad(x, (pad_dur, pad_dur), "constant", constant_values=0 )
+            # print(f"X shape after pad: {x.shape}")
+
             # re-compute crop bound
             crop_bound = x.shape[0] - self.crop_length
         start_idx = np.random.randint(crop_bound)

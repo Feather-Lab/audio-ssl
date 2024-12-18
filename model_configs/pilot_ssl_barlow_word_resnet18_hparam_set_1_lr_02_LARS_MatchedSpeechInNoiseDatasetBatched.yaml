@@ -1,0 +1,43 @@
+audio_rep:
+  name: cochleagram_1
+  on_gpu: true
+audio_transforms:
+  dbspl: 60
+  high_snr: 10
+  low_snr: 0
+data:
+  speech_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/train_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
+  noise_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music.pdh5' 
+  val_speech_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
+  val_noise_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/sr20000_eval_segments_raw_exclude_speech_and_only_music.pdh5' 
+  dataset: MatchedSpeechInNoiseDatasetBatched
+  target_keys: ['signal/word_int']
+
+val_metric: 'val_signal/word_int_acc'
+val_metric_mode: 'min'
+
+hparas:
+  epochs: 50
+  global_batch_size: 704
+  lr: 0.2
+  num_warmup_steps_or_ratio: 0.1
+  optimizer: LARS
+  lambda_ssl: 1
+  ssl_task: 'word'                            # either 'word', 'audioset', 'dual'
+  ssl_loss_str: 'barlow'
+  ssl_loss: 'Barlow_Loss'
+  ssl_loss_kwargs:
+    lmbda: 0.005
+    out_dim: 512
+  valid_step: 5000
+  
+model:
+  arch_name: "SSLBaseModel"
+  arch_kwargs:
+    backbone: 'resnet18'
+    in_channels: 1
+    projector_dims: [512, 512]
+    proj_out_dim: 512
+    n_classes: 793
+    supervised: True
+

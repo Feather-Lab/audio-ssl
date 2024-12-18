@@ -71,10 +71,15 @@ class LitAudioSSL(L.LightningModule):
 
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
-
+        self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
+        if self.opt_supervised_task:
+            self.class_loss = nn.CrossEntropyLoss()
 
     def _step(self, batch, batch_idx, step_type):
-        spec_11, spec_12, spec_21, spec_22  = batch
+        if self.opt_supervised_task: 
+            [spec_11, spec_12, spec_21, spec_22 ], [labels_11, labels_12, labels_21, labels_22] = batch
+        else:
+            spec_11, spec_12, spec_21, spec_22  = batch
         ## Permute dims (1, batch, time) -> (batch, 1, time)
         spec_11 = spec_11.permute(1,0,2)
         spec_12 = spec_12.permute(1,0,2)
@@ -113,7 +118,31 @@ class LitAudioSSL(L.LightningModule):
 
         self.log(f"{step_type}_{self.ssl_loss_str}_loss", loss_ssl.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
-        total_loss = self.lambda_ssl * loss_ssl 
+        class_loss = 0.0
+        if self.opt_supervised_task:
+        # get classification loss
+            for task in labels_11.keys():
+                # This is quick hack - just one task for now
+                class_loss_11 = self.class_loss(logits_11, labels_11[task].squeeze())
+                class_loss_12 = self.class_loss(logits_12, labels_12[task].squeeze())
+                class_loss_21 = self.class_loss(logits_21, labels_21[task].squeeze())
+                class_loss_22 = self.class_loss(logits_22, labels_22[task].squeeze())
+                class_loss = class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22
+                class_loss = class_loss / 4.0
+
+                # calc acc 
+                acc = 0 
+                acc += calculate_accuracy(logits_11, labels_11[task].T).item()
+                acc += calculate_accuracy(logits_12, labels_12[task].T).item()
+                acc += calculate_accuracy(logits_21, labels_21[task].T).item()
+                acc += calculate_accuracy(logits_22, labels_22[task].T).item()
+                acc /= 4.0  
+
+                self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+                self.log(f"{step_type}_{task}_loss", class_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+
+
+        total_loss = self.lambda_ssl * loss_ssl + class_loss
         self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         if 'mmcr' in self.ssl_loss_str:
@@ -140,35 +169,7 @@ class LitAudioSSL(L.LightningModule):
         return self._step(batch, batch_idx, "val")
 
     def test_step(self, batch, batch_idx):
-        # Test step only for JSIN eval 
-        spec_11, spec_12, spec_21, spec_22, labels_1, labels_2 = batch
-                # pass pairs through model 
-        _, _, logits_11 = self.model(spec_11)
-        _, _, logits_12 = self.model(spec_12)
-        _, _, logits_21 = self.model(spec_21)
-        _, _, logits_22 = self.model(spec_22)
-
-        class_loss = 0.0
-        # get classification loss
-        class_loss_11 = self.class_loss(logits_11, labels_1)
-        class_loss_12 = self.class_loss(logits_12, labels_1)
-        class_loss_21 = self.class_loss(logits_21, labels_2)
-        class_loss_22 = self.class_loss(logits_22, labels_2)
-        class_loss = class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22
-        class_loss = class_loss / 4.0
-
-        # calc acc 
-        acc = 0 
-        acc += calculate_accuracy(logits_11, labels_1).item()
-        acc += calculate_accuracy(logits_12, labels_1).item()
-        acc += calculate_accuracy(logits_21, labels_2).item()
-        acc += calculate_accuracy(logits_22, labels_2).item()
-        acc /= 4.0  
-
-        self.log(f"test_class_acc", acc, on_step=True, on_epoch=True, prog_bar=True)
-        self.log(f"test_class_loss", class_loss.detach(), on_step=True, on_epoch=True, prog_bar=True)
-        return class_loss
-
+        return self._step(batch, batch_idx, "test")
 
     def configure_optimizers(self):
         # Optimizer
@@ -226,6 +227,7 @@ class LitAudioSSL(L.LightningModule):
                                                      high_db=self.config['audio_transforms']['high_snr'],
                                                      db_spl=self.config['audio_transforms']['dbspl'],
                                                      batch_size=self.config['hparas']['batch_size'],
+                                                     target_keys=self.config['data'].get("target_keys", None),
                                                      )
         
         train_dataloader = torch.utils.data.DataLoader(
@@ -245,6 +247,7 @@ class LitAudioSSL(L.LightningModule):
                                                      high_db=self.config['audio_transforms']['high_snr'],
                                                      db_spl=self.config['audio_transforms']['dbspl'],
                                                      batch_size=self.config['hparas']['batch_size'],
+                                                     target_keys=self.config['data'].get("target_keys", None),
                                                      )
         dataloader = torch.utils.data.DataLoader(
             dataset,

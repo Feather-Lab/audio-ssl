@@ -18,6 +18,7 @@ from lightning_ssl import LitAudioSSL
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_ssl_imagenet import LitImageSSL 
+from lightning_ssl_audioset import LitAudioSetSSL
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -50,14 +51,19 @@ def cli_main(args):
 
     # get task-specific inits 
     callbacks = []
-    if 'ssl' in config_path.stem or 'imagenet':
+    if any(task_str in config_path.stem for task_str in ['ssl', 'imagenet', 'barlow', 'mmcr']):
         if 'imagenet' in config_path.stem:
             module = LitImageSSL
-        
+
         elif config['hparas'].get('sep_class_opt', False):
             module = LitAudioSSLSepClassOpt
+
         elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
             module = LitAudioSSLMatched
+
+        elif config.get('module', None):
+            module =  eval(config['module'])
+
         else:
             module = LitAudioSSL
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
@@ -98,7 +104,7 @@ def cli_main(args):
         ))
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
-            monitor="val_class_loss" if 'imagenet' in config_path.stem else 'val_total_loss',
+            monitor='val_total_loss',
             filename="{epoch}-{step}-best_val",
             mode= "min",
             save_top_k=1,
@@ -161,7 +167,8 @@ def cli_main(args):
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
                                version=config_path.stem + '_v01',
                                project='cochdnn')
-
+    # log gradients 
+    wandb_logger.watch(model.model, log="all",)
     # Early stopping to save compute
     # if val loss does not improve by 0.1 for 3 epochs (default), end training 
     # callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.1))

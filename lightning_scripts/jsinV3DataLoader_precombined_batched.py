@@ -463,3 +463,135 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             return [output_11, output_12, output_21, output_22], [target_11, target_12, target_21 , target_22]
 
         return output_11, output_12, output_21, output_22
+
+
+
+class jsinv3_audioset_SSL(torch.utils.data.ConcatDataset):
+    # Makes a dataset using pre-paired speech and audioset background sounds
+    # Works with hdf5 files for the jsinv3 dataset.
+    hdf5_glob = "JSIN_all__run_*.h5"
+    target_keys = ["noise/labels_binary_via_int"]
+
+    def __init__(
+        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3
+    ):
+        """
+        Builds the pytorch hdf5 combined dataset from the files found in the
+        specified root directory.
+        """
+        del download
+
+        if train:
+            self.all_hdf5_files = glob.glob(root + "/train_*/" + self.hdf5_glob)
+        else:
+            if eval_max == -1:
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)
+            else:
+                self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)[
+                    0:eval_max
+                ]
+
+        self.datasets = [
+            H5DatasetAudiosetSSL(h5_file, transform, self.target_keys, batch_size, train=train)
+            for h5_file in self.all_hdf5_files
+        ]
+
+        super().__init__(self.datasets)
+        self.rotate_index = 0
+
+
+    def class_map(self):
+        """
+        Loads the mapping between the word IDX and human readable word map.
+        """
+        word_and_speaker_encodings = pickle.load(
+            open("word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
+        return class_map
+
+
+
+class H5DatasetAudiosetSSL(torch.utils.data.Dataset):
+    def __init__(self, path, transform, target_keys, batch_size, train=True):
+        """
+        Builds a pytorch hdf5 dataset. Returns signal1, signal2, label if train; signal1, label else
+        Args:
+            path (str): location of the hdf5 dataset
+        """
+        self.file_path = path
+        self.dataset = None
+        self.transform = transform
+        self.target_keys = target_keys
+        self.batch_size = batch_size
+        self.train = train
+
+        # These TODOs are not implemented for the release. HDF5 files are
+        # already shuffled, so we can run through them directly.
+        # TODO: implement chunking the hdf5 file so that we can shuffle the data
+        # TODO: implement shuffling the audioset and the speech separately
+        # self.chunk_size = hdf5_chunk_size
+        with h5py.File(self.file_path, "r", swmr=True) as file:
+            self.n_signals = len(file["sources"]["signal"]["signal"])
+
+        # scale dataset len after setting split indices
+        self.dataset_len =  self.n_signals // self.batch_size
+          # scale by batch size for dataloader (accessed in len method)
+
+    def __getitem__(self, index):
+        """
+        """
+        if self.dataset is None:
+            self.dataset = h5py.File(
+                self.file_path, "r", swmr=True
+            )  # ["ndarray_data"]["signal"]
+        # set up ix logic
+        start = index * self.batch_size
+        end = start + self.batch_size # second half will be noises used for augmentation
+
+        batch_ixs = np.arange(start, end)
+        noises = self.dataset["sources"]["noise"]["signal"][batch_ixs]
+
+        if self.train:
+            aug_ix = np.random.randint(self.n_signals - self.batch_size) # second half will be noises used for augmentation
+            augments = self.dataset["sources"]["noise"]["signal"][aug_ix: aug_ix + self.batch_size ]
+        ## Get labels 
+        target_paths = self.target_keys[0].split("/")
+        target = self.dataset["sources"][target_paths[0]][target_paths[1]][
+                batch_ixs
+            ]
+
+        # get where noises are None 
+        bad_ixs = np.argwhere(noises.sum(1) == 0).flatten()
+        if len(bad_ixs) > 0:
+            good_ixs =  np.argwhere(noises.sum(1) != 0).flatten()
+            samp_ixs = np.random.choice(good_ixs, size=len(bad_ixs))
+            assert len(bad_ixs) == len(samp_ixs), f"{len(bad_ixs)} bad ixs, but drew {len(samp_ixs)} ixs to resample."
+            noises[bad_ixs] = noises[samp_ixs]
+            target[bad_ixs] = target[samp_ixs]
+        
+        target = torch.from_numpy(target).float()
+        
+        if self.train:
+            aud_1 = []
+            aud_2 = []
+            for noise in noises:
+                aug_ixs = np.random.randint(self.batch_size, size=2)
+                aug_1, aug_2 = augments[aug_ixs]
+                # get view
+                view1, _ = self.transform(noise, aug_1)
+                view2, _ = self.transform(noise, aug_2)
+                aud_1.append(view1)
+                aud_2.append(view2)
+            aud_1 = torch.stack(aud_1)
+            aud_2 = torch.stack(aud_2)
+
+            return aud_1, aud_2, target 
+        else:
+            aud_1 = torch.stack([
+                self.transform(noise, None)[0] for noise in noises
+            ])
+            return aud_1, target 
+        
+    def __len__(self):
+        return self.dataset_len

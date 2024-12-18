@@ -1,0 +1,44 @@
+data:
+  root: '/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/'
+
+audio_rep:                                  # Attributes of audio feature
+  name: 'cochleagram_1_1_5_secs'
+  on_gpu: True
+
+audio_transforms:
+  low_snr: 0
+  high_snr: 10
+  dbspl: 60
+  crop: 'RandomCropForegroundBackground'
+  crop_kwrgs:
+    signal_size: 40000        # signal size in frames
+    crop_length: 30000 
+# val_metric: 'val_ppe'
+# val_metric_mode: 'min'
+
+hparas:                                   # Experiment hyper-parameters
+  epochs: 10                              # Each "epoch" is 25 passes through the speech dataset
+  global_batch_size: 1312                 # set global batch size as init. Will be divided by n gpus and task params
+  optimizer: "LARS"
+  lr: 0.2                                # initial LR 
+  num_warmup_steps_or_ratio: 0.1
+  lambda_ssl: 1
+  valid_step: 5000
+  ssl_task: 'word'                            # either 'word', 'audioset', 'dual'
+  ssl_loss_str: 'barlow'
+  ssl_loss: 'Barlow_Loss'
+  ssl_loss_kwargs:
+    lmbda: 0.005
+    out_dim: 512
+    
+
+model:                                    # Model architecture
+  arch_name: "SSLBaseModel"
+  arch_kwargs:
+    backbone: 'resnet18'
+    in_channels: 1
+    projector_dims: [512, 512]
+    proj_out_dim: 512
+    n_classes: 794
+    supervised: True
+    

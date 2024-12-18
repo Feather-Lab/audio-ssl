@@ -160,7 +160,7 @@ class LitAudioSSL(L.LightningModule):
             self.log(f"{step_type}_class_loss", class_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
         total_loss = self.lambda_ssl * loss_ssl + class_loss
-        self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+        self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         if 'mmcr' in self.ssl_loss_str:
             # log pretraining percent error (Eq. 4 in https://arxiv.org/pdf/2406.09366):
