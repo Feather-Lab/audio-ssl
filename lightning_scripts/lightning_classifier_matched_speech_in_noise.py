@@ -71,7 +71,6 @@ class LitWordAudioSetModel(L.LightningModule):
 
     def _step(self, batch, batch_idx, step_type):
         audio, label_dict = batch
-
         # logits will be dict - keys for each task
         logits = self.model(audio)
 
@@ -84,8 +83,8 @@ class LitWordAudioSetModel(L.LightningModule):
             task_acc = self.accuracy[step_type][task](logits[task], label_dict[task])
             # format task str for logging: remove 'noise/' or 'signal/' from str
             self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-            self.log(f"{step_type}_{task}_acc", task_acc, on_step=True if step_type == 'train' else False,
-                                                          on_epoch=False if step_type == 'train' else True,
+            self.log(f"{step_type}_{task}_acc", task_acc, on_step=False ,
+                                                          on_epoch=True,
                                                           prog_bar=True, sync_dist=True)
         # log current learning rate 
         lr = self.schedule.get_last_lr()[0]
@@ -118,7 +117,7 @@ class LitWordAudioSetModel(L.LightningModule):
     def configure_optimizers(self):
         # Optimizer
         opt = getattr(torch.optim, self.config['hparas']['optimizer'])
-        self.optimizer = opt(self.model.parameters(), lr=self.config['hparas']['lr'])     
+        self.optimizer = opt(self.model.parameters(),  **self.config['hparas']['optimizer_kwargs'])     
         self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
               
         return [self.optimizer],   {

@@ -23,7 +23,7 @@ class ProjectionHead(nn.Module):
         return self.g(x)
 
 class SSLBaseModel(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, n_classes=794, supervised=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
         super().__init__()
         self.supervised = supervised
         self.backbone = backbone
@@ -44,7 +44,7 @@ class SSLBaseModel(nn.Module):
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
         if supervised:
-            self.lin_cls = nn.Linear(proj_out_dim, n_classes)
+            self.lin_cls = nn.Linear(proj_out_dim, num_classes)
 
     def forward(self, x):
         x_ = self.f(x)
@@ -58,7 +58,7 @@ class SSLBaseModel(nn.Module):
 
 
 class SSLBaseModelDualTask(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, n_classes=794, supervised=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
         super().__init__()
         self.supervised = supervised
         self.backbone = backbone
@@ -73,7 +73,13 @@ class SSLBaseModelDualTask(nn.Module):
         self.g_inv = ProjectionHead(projector_dims)
         self.g_equi = ProjectionHead(projector_dims)
         if supervised:
-            self.lin_cls = nn.Linear(proj_out_dim, n_classes)
+            if isinstance(num_classes, dict): # Make multiple fully conected layers
+                all_fc_layers = {}
+                for task in num_classes.keys():
+                    all_fc_layers[task] = nn.Linear(proj_out_dim, num_classes[task]) 
+                self.lin_cls = nn.ModuleDict(all_fc_layers)
+            else:
+                self.lin_cls = nn.Linear(proj_out_dim, num_classes)
 
     def forward(self, x):
         x = self.f(x)
@@ -83,12 +89,17 @@ class SSLBaseModelDualTask(nn.Module):
         if not self.supervised:
             return feature, (inv_out, equi_out), None 
         else:
-            logits = self.lin_cls(feature.detach())
-        return feature, (inv_out, equi_out,), logits
+            if isinstance(self.lin_cls, nn.ModuleDict): 
+                logits = {}
+                for task, fc_l in self.lin_cls.items():
+                    logits[task] = fc_l(feature.detach())
+            else:
+                logits = self.lin_cls(feature.detach())
+        return feature, (inv_out, equi_out), logits
 
 
 class SSLAudioModel(nn.Module):
-    def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, n_classes=794, supervised=False, **kwargs):
+    def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, num_classes=794, supervised=False, **kwargs):
         super().__init__()
         self.supervised = supervised
 
@@ -108,7 +119,7 @@ class SSLAudioModel(nn.Module):
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
         if supervised:
-            self.lin_cls = nn.Linear(proj_out_dim, n_classes)
+            self.lin_cls = nn.Linear(proj_out_dim, num_classes)
 
     def forward(self, x):
         x_ = self.f(x)
@@ -122,7 +133,7 @@ class SSLAudioModel(nn.Module):
     
     
 class SSLAudioModelWMetamers(nn.Module):
-    def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, n_classes=794, supervised=False, **kwargs):
+    def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, num_classes=794, supervised=False, **kwargs):
         super().__init__()
         self.supervised = supervised
 
@@ -141,7 +152,7 @@ class SSLAudioModelWMetamers(nn.Module):
         layers.append(nn.Linear(projector_dims[-2], projector_dims[-1], bias=False))
         self.g = nn.Sequential(*layers)
         if supervised:
-            self.lin_cls = nn.Linear(proj_out_dim, n_classes)
+            self.lin_cls = nn.Linear(proj_out_dim, num_classes)
 
     def forward(self, x):
         x_ = self.f(x)

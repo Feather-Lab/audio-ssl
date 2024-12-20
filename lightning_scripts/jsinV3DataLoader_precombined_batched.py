@@ -373,13 +373,17 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         return len(self.speech_metadata) // (2 * self.batch_size)
     
     def __getitem__(self, idx):
-        speech = self.speech_files['ndarray_data']['signal'][idx:idx + self.batch_size * 2]
+        speech_ixs = np.arange(idx, idx + self.batch_size * 2)
+
         noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
-        noise = self.noise_files['ndarray_data']['signal'][noise_idx:noise_idx + self.batch_size * 2]
+        noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)
+
+        speech = self.speech_files['ndarray_data']['signal'][speech_ixs]
+        noise = self.noise_files['ndarray_data']['signal'][noise_ixs]
         
         # shuffle the indices of speech and noise - externalize for label ix-ing
-        speech_ixs = np.random.permutation(speech.shape[0])
-        noise_ixs = np.random.permutation(noise.shape[0])
+        speech_batch_ixs = np.random.permutation(speech.shape[0])
+        noise_batch_ixs = np.random.permutation(noise.shape[0])
         
         output_11, output_12, output_21, output_22 = [], [], [], []
 
@@ -396,14 +400,18 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                 
         for i in range(self.batch_size):
             # map batch ix to shuffle ix to make label alignment easy
-            speech_1_ix, speech_2_ix = speech_ixs[i * 2], speech_ixs[i * 2 + 1]
-            noise_1_ix, noise_2_ix = noise_ixs[i * 2] , noise_ixs[i * 2 + 1]
+            speech_1_ix, speech_2_ix = speech_batch_ixs[i * 2], speech_batch_ixs[i * 2 + 1]
+            noise_1_ix, noise_2_ix = noise_batch_ixs[i * 2] , noise_batch_ixs[i * 2 + 1]
+            # get label ixs 
+            speech_label_1_ix, speech_label_2_ix = speech_ixs[speech_1_ix], speech_ixs[speech_2_ix]
+            noise_label_1_ix, noise_label_2_ix = noise_ixs[noise_1_ix], noise_ixs[noise_2_ix]
+
             # get speech example
             speech_1, speech_2 = speech[speech_1_ix], speech[speech_2_ix]
             if len(speech_1) > len(speech_2):
                 speech_1, speech_2 = speech_2, speech_1
                 # track ix swap for labeling 
-                speech_1_ix, speech_2_ix = speech_2_ix, speech_1_ix
+                speech_label_1_ix, speech_label_2_ix = speech_label_2_ix, speech_label_1_ix
 
             # get noise example 
             noise_1, noise_2 = self.random_crop(noise[noise_1_ix]), self.random_crop(noise[noise_2_ix])
@@ -414,15 +422,15 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                 for target_key in self.target_keys:
                     target_type, target_name = target_key.split("/")
                     if target_type == 'signal':
-                        target_11[target_key].append(self.speech_metadata.loc[speech_1_ix, target_name].item())
-                        target_12[target_key].append(self.speech_metadata.loc[speech_1_ix, target_name].item())
-                        target_21[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
-                        target_22[target_key].append(self.speech_metadata.loc[speech_2_ix, target_name].item())
+                        target_11[target_key].append(self.speech_metadata.loc[speech_label_1_ix, target_name].item())
+                        target_12[target_key].append(self.speech_metadata.loc[speech_label_1_ix, target_name].item())
+                        target_21[target_key].append(self.speech_metadata.loc[speech_label_2_ix, target_name].item())
+                        target_22[target_key].append(self.speech_metadata.loc[speech_label_2_ix, target_name].item())
                     elif target_type == 'noise':
-                        target_11[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_1_ix])
-                        target_12[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_2_ix])
-                        target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_1_ix])
-                        target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_2_ix])
+                        target_11[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
+                        target_12[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
+                        target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
+                        target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
             
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)

@@ -8,7 +8,7 @@ import os, sys
 
 sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
-from metrics import calculate_accuracy
+from torchmetrics.classification import Accuracy, BinaryPrecision
 import losses as ssl_losses
 # import audio_ssl.losses as ssl_losses 
 
@@ -17,7 +17,8 @@ from typing import List, Union, Tuple
 # from pprint import pprint
 
 from jsinV3DataLoader_precombined_batched import MatchedSpeechInNoiseDatasetBatched
-import robustness.audio_functions.audio_transforms as at 
+import robustness.audio_functions.audio_transforms as at
+from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
 
 class ModelWithFrontEnd(nn.Module):
@@ -73,29 +74,35 @@ class LitAudioSSL(L.LightningModule):
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
         if self.opt_supervised_task:
-            self.class_loss = nn.CrossEntropyLoss()
+            self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
+                                                      batch_size=None,
+                                                    #   reduction='none'
+                                                    )
+            self.metrics = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
+                        for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()}) 
+        
 
     def _step(self, batch, batch_idx, step_type):
         if self.opt_supervised_task: 
-            [spec_11, spec_12, spec_21, spec_22 ], [labels_11, labels_12, labels_21, labels_22] = batch
+            [spec_11, spec_12, spec_21, spec_22], [labels_11, labels_12, labels_21, labels_22] = batch
         else:
             spec_11, spec_12, spec_21, spec_22  = batch
         ## Permute dims (1, batch, time) -> (batch, 1, time)
-        spec_11 = spec_11.permute(1,0,2)
-        spec_12 = spec_12.permute(1,0,2)
-        spec_21 = spec_21.permute(1,0,2)
-        spec_22 = spec_22.permute(1,0,2)
+        # spec_11 = spec_11.permute(1,0,2)
+        # spec_12 = spec_12.permute(1,0,2)
+        # spec_21 = spec_21.permute(1,0,2)
+        # spec_22 = spec_22.permute(1,0,2)
 
         # pass pairs through model 
         _, out_11, logits_11 = self.model(spec_11)
         _, out_12, logits_12 = self.model(spec_12)
         _, out_21, logits_21 = self.model(spec_21)
         _, out_22, logits_22 = self.model(spec_22)
-
         ## concat reps based on task 
         if self.ssl_task == 'dual':
             # concat is handled in the paired loss function 
             loss_ssl, inv_loss, eq_loss = self.ssl_loss(out_11, out_12, out_21, out_22)
+
             self.log(f"{step_type}_inv_loss", inv_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
             self.log(f"{step_type}_eq_loss", eq_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
@@ -121,28 +128,35 @@ class LitAudioSSL(L.LightningModule):
         class_loss = 0.0
         if self.opt_supervised_task:
         # get classification loss
-            for task in labels_11.keys():
-                # This is quick hack - just one task for now
-                class_loss_11 = self.class_loss(logits_11, labels_11[task].squeeze())
-                class_loss_12 = self.class_loss(logits_12, labels_12[task].squeeze())
-                class_loss_21 = self.class_loss(logits_21, labels_21[task].squeeze())
-                class_loss_22 = self.class_loss(logits_22, labels_22[task].squeeze())
-                class_loss = class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22
-                class_loss = class_loss / 4.0
+            class_loss_11, task_loss_11 = self.multi_task_loss(logits_11, labels_11, return_indiv_loss=True)
+            class_loss_12, task_loss_12 = self.multi_task_loss(logits_12, labels_12, return_indiv_loss=True)
+            class_loss_21, task_loss_21  = self.multi_task_loss(logits_21, labels_21, return_indiv_loss=True)
+            class_loss_22, task_loss_22 = self.multi_task_loss(logits_22, labels_22, return_indiv_loss=True)
 
-                # calc acc 
-                acc = 0 
-                acc += calculate_accuracy(logits_11, labels_11[task].T).item()
-                acc += calculate_accuracy(logits_12, labels_12[task].T).item()
-                acc += calculate_accuracy(logits_21, labels_21[task].T).item()
-                acc += calculate_accuracy(logits_22, labels_22[task].T).item()
+            total_class_loss = (class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22) / 4.0 
+
+            for task, metric in self.metrics.items():
+                # Add acc per task 
+                task_loss = task_loss_11[task] + task_loss_12[task] + task_loss_21[task] + task_loss_22[task]
+                task_loss = task_loss / 4.0
+
+                self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+
+                acc = 0
+                acc += metric(logits_11[task], labels_11[task]).item()
+                acc += metric(logits_12[task], labels_12[task]).item()
+                acc += metric(logits_21[task], labels_21[task]).item()
+                acc += metric(logits_22[task], labels_22[task]).item()
                 acc /= 4.0  
 
-                self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
-                self.log(f"{step_type}_{task}_loss", class_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+                if 'signal' in task:
+                    self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+                else:
+                    self.log(f"{step_type}_{task}_prec", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
 
-        total_loss = self.lambda_ssl * loss_ssl + class_loss
+
+        total_loss = self.lambda_ssl * loss_ssl + total_class_loss
         self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         if 'mmcr' in self.ssl_loss_str:
@@ -174,39 +188,62 @@ class LitAudioSSL(L.LightningModule):
     def configure_optimizers(self):
         # Optimizer
         if self.config['hparas']['optimizer'] == "LARS":
-            # Typical learning rate scheduling is handled in CosineWarmupScheduler
-            # as init_lr * batchsize / 256
-            # lr given to LARS is 0
-            #  CosineWarmupScheduler handles incrementing the LR
-            self.optimizer = LARS(
-                            self.model.parameters(),
-                            lr=0,
-                            weight_decay=1e-6,
-                            momentum=0.9,
-                            weight_decay_filter=True,
-                            lars_adaptation_filter=True,
-                        )
-            total_training_steps = self.total_training_steps()
-            num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
-            lr_scheduler = CosineWarmupScheduler(
-                optimizer=self.optimizer,
-                batch_size=self.config['hparas']['global_batch_size'], # is global batch size
-                warmup_steps=num_warmup_steps,
-                max_steps=total_training_steps,
-                lr=self.config['hparas']['lr']
-            )
-            return [self.optimizer], [
-                {
-                    'scheduler': lr_scheduler,  # The LR scheduler instance (required)
-                    'interval': 'step',  # The unit of the scheduler's step size
-                }
-            ]                                                
-
+            if self.config['hparas'].get("num_warmup_steps_or_ratio", False):
+                # Typical learning rate scheduling is handled in CosineWarmupScheduler
+                # as init_lr * batchsize / 256
+                # lr given to LARS is 0
+                #  CosineWarmupScheduler handles incrementing the LR
+                self.optimizer = LARS(
+                                self.model.parameters(),
+                                lr=0,
+                                weight_decay=1e-6,
+                                momentum=0.9,
+                                weight_decay_filter=True,
+                                lars_adaptation_filter=True,
+                            )
+                total_training_steps = self.total_training_steps()
+                num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
+                lr_scheduler = CosineWarmupScheduler(
+                    optimizer=self.optimizer,
+                    batch_size=self.config['hparas']['global_batch_size'], # is global batch size
+                    warmup_steps=num_warmup_steps,
+                    max_steps=total_training_steps,
+                    lr=self.config['hparas']['lr']
+                )
+                return [self.optimizer], [
+                    {
+                        'scheduler': lr_scheduler,  # The LR scheduler instance (required)
+                        'interval': 'step',  # The unit of the scheduler's step size
+                    }
+                ]                  
+            else:
+                lr = self.config['hparas']['lr'] * self.config['hparas']['global_batch_size'] / 256 
+                self.optimizer = LARS(
+                                self.model.parameters(),
+                                lr=lr,
+                                weight_decay=1e-5,
+                                momentum=0.9,
+                                weight_decay_filter=True,
+                                lars_adaptation_filter=True,
+                            )                        
         else:
             lr = self.config['hparas']['lr'] * self.config['hparas']['global_batch_size'] / 256 
             opt = getattr(torch.optim, self.config['hparas']['optimizer'])
             self.optimizer = opt(self.model.parameters(), lr=lr)      
         return [self.optimizer]
+
+    def on_before_optimizer_step(self, _):
+        def _get_grad_norm(params, scale=1):
+            """Compute grad norm given a gradient scale."""
+            total_norm = 0.0
+            for p in params:
+                if p.grad is not None:
+                    param_norm = (p.grad.detach().data / scale).norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm**0.5
+            return total_norm
+        grad_norm = _get_grad_norm(self.model.parameters())
+        self.log("grad_norm", torch.tensor(grad_norm), prog_bar=True, on_step=True, on_epoch=False)
 
     def forward(self, x):
         """
@@ -219,6 +256,25 @@ class LitAudioSSL(L.LightningModule):
         """
         return self.model(x)
 
+    def collate_fn(self, batch):
+        batch = batch[0]
+        if len(batch) == 2:
+            all_audio = []
+            for audio in batch[0]:
+                all_audio.append(audio.unsqueeze(1))
+            labels = []
+            for label_set in batch[1]:
+                view_labels = {}
+                if isinstance(label_set, dict):
+                    for key, l in label_set.items():
+                        view_labels[key] = l.squeeze()
+                    labels.append(view_labels)
+                else:
+                    labels.append(label_set.squeeze())
+            return all_audio, labels 
+        elif len(batch) == 4: # no labels
+            return [audio.unsqueeze(1) for audio in batch]
+  
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
         dataset = MatchedSpeechInNoiseDatasetBatched(speech_h5_path=self.config['data']['speech_h5_path'],
@@ -237,6 +293,7 @@ class LitAudioSSL(L.LightningModule):
             pin_memory=True,
             # persistent_workers=True,
             shuffle=False,
+            collate_fn=self.collate_fn
         )
         return train_dataloader
     
@@ -254,6 +311,8 @@ class LitAudioSSL(L.LightningModule):
             batch_size=1,
             num_workers=self.config['num_workers'],
             shuffle=False,
+            collate_fn=self.collate_fn
+
         )
         return dataloader
 

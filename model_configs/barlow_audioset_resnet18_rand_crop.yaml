@@ -14,14 +14,14 @@ audio_transforms:
     signal_size: 40000        # signal size in frames
     crop_length: 30000 
 
-val_metric: 'val_class_prec_step'
+val_metric: 'val_class_prec_epoch'
 val_metric_mode: 'max'
 
 module: LitAudioSetSSL
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 10                              # Each "epoch" is 25 passes through the speech dataset
-  global_batch_size: 256                 # set global batch size as init. Will be divided by n gpus and task params
+  global_batch_size: 512                 # set global batch size as init. Will be divided by n gpus and task params
   optimizer: "LARS"
   lr: 0.4                                # initial LR 
   lambda_ssl: 1
@@ -41,6 +41,6 @@ model:                                    # Model architecture
     in_channels: 1
     projector_dims: [8192, 1024]
     proj_out_dim: 512
-    n_classes: 517
+    num_classes: 517
     supervised: True
     

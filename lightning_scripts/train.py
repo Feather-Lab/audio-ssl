@@ -50,7 +50,7 @@ def cli_main(args):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # get task-specific inits 
-    callbacks = []
+    classifier = False
     if any(task_str in config_path.stem for task_str in ['ssl', 'imagenet', 'barlow', 'mmcr']):
         if 'imagenet' in config_path.stem:
             module = LitImageSSL
@@ -68,31 +68,51 @@ def cli_main(args):
             module = LitAudioSSL
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
 
-        # TODO: init validation losses for SSL pre-training
-        val_metrics = config.get("val_metric", None)
-        if val_metrics: 
-            if isinstance(val_metrics, list):
-                for metric in val_metrics:
-                    callbacks.append(ModelCheckpoint(
-                                checkpoint_dir,
-                                monitor=f"{metric}",
-                                mode=config['val_metric_mode'],
-                                filename="{epoch}-{step}-best_val",
-                                save_top_k=1,
-                                save_weights_only=True,
-                                verbose=True,
-                    ))
-            else:   
+    else:
+        classifier = True
+        if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+            module = LitWordAudioSetModelMatched
+        else:
+            module = LitWordAudioSetModel
+        config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
+
+    val_metrics = config.get("val_metric", None)
+    callbacks = []
+    if val_metrics: 
+        if isinstance(config['val_metric'], dict):
+            for name, value in config['val_metric'].items():
                 callbacks.append(ModelCheckpoint(
-                            checkpoint_dir,
-                            monitor=f"{config['val_metric']}",
-                            mode=config['val_metric_mode'],
-                            filename="{epoch}-{step}-best_val",
-                            save_top_k=1,
-                            save_weights_only=True,
-                            verbose=True,
+                    checkpoint_dir,
+                    filename="{epoch}-{step}-best_"+name,
+                    monitor=value,
+                    mode="max",
+                    save_top_k=1,
+                    # save_weights_only=True,
+                    verbose=True,
                 ))
-                
+        else:
+            callbacks.append(ModelCheckpoint(
+                checkpoint_dir,
+                monitor=f"val_{config['val_metric']}",
+                mode="max" if 'acc' in config['val_metric'] else "min",
+                filename=f"{epoch}-{step}-best_{config['val_metric']}",
+                save_top_k=1,
+                save_weights_only=False,
+                verbose=True,
+            ))
+                    
+            
+    if classifier:
+        callbacks.append(ModelCheckpoint(
+            checkpoint_dir,
+            monitor="train_loss",
+            filename="{epoch}-{step}-best_train",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=False,
+            verbose=True,
+        ))
+    else:
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
             monitor="train_total_loss",
@@ -111,45 +131,7 @@ def cli_main(args):
             save_weights_only=False,
             verbose=True,
         ))
-        val_loss_to_stop_on = "val_total_loss"
-    else:
-        if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
-            module = LitWordAudioSetModelMatched
-        else:
-            module = LitWordAudioSetModel
-        config['hparas']['batch_size'] = config['hparas']['batch_size'] // args.gpus
-
-        if isinstance(config['val_metric'], dict):
-            for name, value in config['val_metric'].items():
-                callbacks.append(ModelCheckpoint(
-                    checkpoint_dir,
-                    filename="{epoch}-{step}-best_"+name,
-                    monitor=value,
-                    mode="max",
-                    save_top_k=1,
-                    # save_weights_only=True,
-                    verbose=True,
-                ))
-        else:
-            callbacks.append(ModelCheckpoint(
-                checkpoint_dir,
-                monitor=f"val_{config['val_metric']}",
-                mode="max" if 'acc' in config['val_metric'] else "min",
-                save_top_k=1,
-                save_weights_only=True,
-                verbose=True,
-            ))
-
-        callbacks.append(ModelCheckpoint(
-            checkpoint_dir,
-            monitor="train_loss",
-            filename="{epoch}-{step}-best_train",
-            mode="min",
-            save_top_k=1,
-            save_weights_only=True,
-            verbose=True,
-        ))
-        val_loss_to_stop_on = "val_loss"
+        # val_loss_to_stop_on = "val_loss"
 
 
     ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
@@ -165,7 +147,7 @@ def cli_main(args):
     callbacks.append(lr_monitor)
     
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               version=config_path.stem + '_v01',
+                               version=config_path.stem,
                                project='cochdnn')
     # log gradients 
     wandb_logger.watch(model.model, log="all",)
@@ -184,6 +166,8 @@ def cli_main(args):
         accelerator="gpu", 
         strategy='ddp',
         gradient_clip_val=grad_clip, # clipt grad l2 norm to 1 
+        # limit_train_batches=2,
+        # limit_val_batches=2,
         # val_check_interval=config['hparas']['valid_step'], # just validate every epoch 
         profiler=None,
         callbacks=callbacks)

@@ -2,12 +2,12 @@
 #SBATCH --job-name=train_supervised
 #SBATCH --output=outLogs/train_word_aud_supervised_matched_%j.out
 #SBATCH --error=outLogs/train_word_aud_supervised_matched_%j.err
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=12
 
-#SBATCH --mem=48Gb
-#SBATCH --time=8:00:00
+#SBATCH --mem=64Gb
+#SBATCH --time=2:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
@@ -29,8 +29,8 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/word_speaker_audioset_resnet18_MatchedSpeechInNoiseDatasetBatched.yaml \
+srun python3 lightning_scripts/train.py --config_path model_configs/word_speaker_audioset_resnet18_MatchedSpeechInNoiseDatasetBatched_AdamW.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
-                                #    --resume_training 
-
+                                 #   --resume_training 
+# 

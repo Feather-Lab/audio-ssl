@@ -5,6 +5,7 @@ import yaml
 import torch as ch
 import os
 import scipy
+from dataclasses import dataclass
 import matplotlib.pylab as plt
 # sys.path.append('/om/user/jfeather/python-packages/tfmatching/')
 # import synthhelpers
@@ -27,8 +28,16 @@ matplotlib.rcParams.update({'font.size': 26})
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 
-# save the dictionary. 
+@dataclass
+class AudioParams:
+    """Track audio params used to load sounds"""
+    samp_rate: int = 20_000
+    dur_sec: int = 2
 
+audio_params = AudioParams()
+
+
+# save the dictionary. 
 def save_obj(obj, name ):
     with open(name + '.pkl', 'wb') as f:
         pckl.dump(obj, f, pckl.HIGHEST_PROTOCOL)
@@ -252,7 +261,8 @@ def downsample_activations(activations, num_activations, layer_random_projection
 
 def get_features_list(model, net_name, data_paths, data_labels_paths, fold, layer, 
                       num_activations, num_reps, SEED, scratch_activations_dir, 
-                      sound_identifiers, overwrite, layer_random_projections=None):
+                      sound_identifiers, overwrite, layer_random_projections=None,
+                      DUR_SECS=2):
     '''
     Passes each sound in data (in the form of a tensor) into model
     and collect activations from specified layer (features for svm)
@@ -286,7 +296,7 @@ def get_features_list(model, net_name, data_paths, data_labels_paths, fold, laye
     else:
         print("Running save_activations()")
         save_activations(data_paths,  model, net_name, layer, num_reps, SEED,
-                         scratch_activations_dir, sound_identifiers, overwrite)
+                         scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS)
         print("Finished save_activations()")
        
         activations = []
@@ -358,7 +368,7 @@ def get_features_list(model, net_name, data_paths, data_labels_paths, fold, laye
     return activation_mat, data_labels, layer_random_projections
    
 def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
-                     scratch_activations_dir, sound_identifiers, overwrite):
+                     scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS):
     """
     Measures the activations for the sound and saves it into the scratch directory. 
     If the file already exists and overwrite is false, skips to the next sound.
@@ -391,6 +401,7 @@ def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
             #                                                  START_SECS='random')
             sound, SR = audio_helpers.load_audio_wav_resample(audio_path, 
                                                              resample_SR=20000, 
+                                                             DUR_SECS=DUR_SECS,
                                                              START_SECS='random',
                                                              as_float32=True)
 
@@ -400,6 +411,7 @@ def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
                 #                                                  START_SECS='random')
                 sound, SR = audio_helpers.load_audio_wav_resample(audio_path, 
                                                                  resample_SR=20000, 
+                                                                 DUR_SECS=DUR_SECS,
                                                                  START_SECS='random',
                                                                  as_float32=True)
             sound_array.append(preproc_sound_np(sound)) # normalize
@@ -456,7 +468,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                    SEED=1,
                                    average_test_predictions=False, 
                                    c_values=[0.01,0.1,1],
-                                   overwrite=False):
+                                   overwrite=False,
+                                   DUR_SECS=2):
     """
     Trains an SVM to get predictions on ESC-50 sounds that are run through a pre-trained model.
     Inputs
@@ -481,6 +494,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
         c_values for sklearn to try during SVM cross-validation
     overwrite : bool
         if true, overwrites saved pickles for the first fold
+    DUR_SECS : int
+        duration of audio to give model
     """
     folds = [1, 2, 3, 4, 5]
     data_path = '/mnt/ceph/users/igriffith/datasets/ESC-50-master/audio/' # .wav files of the sound clips
@@ -505,7 +520,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                                          train_labels_paths, left_out_fold, 
                                                          layer, num_activations, num_reps, 
                                                          SEED, scratch_activations_dir, 
-                                                         sound_identifiers['train'], overwrite)
+                                                         sound_identifiers['train'], overwrite,
+                                                         DUR_SECS=DUR_SECS)
         print("getting test features")
 
         test_features, test_labels, layer_random_projections = get_features_list(model, net_name, test_data_paths, 
@@ -513,7 +529,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                                        layer, num_activations, num_reps, 
                                                        SEED, scratch_activations_dir, 
                                                        sound_identifiers['test'], overwrite,
-                                                       layer_random_projections=layer_random_projections)
+                                                       layer_random_projections=layer_random_projections,
+                                                       DUR_SECS=DUR_SECS)
         print("finished get_features_list()")
 
         # normalization
@@ -684,6 +701,8 @@ if __name__ == '__main__':
     import argparse
     from lightning_classifier import LitWordAudioSetModel
     from lightning_ssl import LitAudioSSL
+    from lightning_ssl_audioset import LitAudioSetSSL
+
 
     #########PARSE THE ARGUMENTS FOR THE FUNCTION#########
     parser = argparse.ArgumentParser(description='Input parameters for SVM evaluation of ESC-50')
@@ -744,12 +763,19 @@ if __name__ == '__main__':
         ckpt_path = args.ckpt_path
         ckpt_str = '_best_val_ckpt'
 
-    if 'ssl' in config_path.stem:
+    if config.get('module', None):
+        module =  eval(config['module']).load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    elif 'ssl' in config_path.stem:
         module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     else:
         module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         
     model = module.model.eval()
+
+    DUR_SECS=2
+    if config['audio_transforms'].get('crop', False):
+        DUR_SECS = config['audio_transforms']['crop_kwrgs']['crop_length']/20_000 # divide crop len by samp rate
+
 
     metamer_layers = module.metamer_layers
     # model, ds, metamer_layers = build_network.main(return_metamer_layers=True)
@@ -766,5 +792,6 @@ if __name__ == '__main__':
                                    SEED=args.SEED,
                                    average_test_predictions=args.AVG_TEST_PREDICTIONS,
                                    c_values=args.C_VALUES, 
-                                   overwrite=args.OVERWRITE)
+                                   overwrite=args.OVERWRITE,
+                                   DUR_SECS=DUR_SECS)
 

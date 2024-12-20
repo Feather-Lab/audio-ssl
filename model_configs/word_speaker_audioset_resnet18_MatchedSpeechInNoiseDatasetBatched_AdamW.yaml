@@ -22,10 +22,11 @@ val_metric:
 
 hparas:                                   # Experiment hyper-parameters
   epochs: 150                              
-  batch_size: 48                         # using Matched dataset - true global batch size is 4x this (e.g. 768 if 192)
+  batch_size: 200                          # using Matched dataset - true global batch size is 4x this (e.g. 768 if 192)
   step_lr: 50                              
   optimizer: "AdamW"
-  lr: 0.1                                 # initial LR 
+  optimizer_kwargs:
+    lr: 0.001                            # initial LR 
   valid_step: 5000
   task_loss_params:
     signal/word_int:

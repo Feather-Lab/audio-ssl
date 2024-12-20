@@ -1,13 +1,13 @@
 #!/bin/bash -l
 #SBATCH --job-name=word_ssl
-#SBATCH --output=outLogs/train_word_barlow_matched_pilot_%j.out
-#SBATCH --error=outLogs/train_word_barlow_matched_pilot_%j.err
-#SBATCH --ntasks-per-node=4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=8
+#SBATCH --output=outLogs/barlow_dualtask_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.out
+#SBATCH --error=outLogs/barlow_dualtask_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.err
+#SBATCH --ntasks-per-node=2
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-gpu=12
 
 #SBATCH --mem=68Gb
-#SBATCH --time=3:00:00
+#SBATCH --time=03:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
@@ -51,7 +51,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                   # --resume_training 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_word_resnet18_barlow_rand_crop.yaml \
+srun python3 lightning_scripts/train.py --config_path model_configs/barlow_dualtask_resnet18_MatchedSpeechInNoiseDatasetBatched.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                   # --resume_training 
