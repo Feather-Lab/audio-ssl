@@ -21,9 +21,9 @@ val_metric:
     audioset_task: 'val_noise/labels_int_acc'
 
 hparas:                                   # Experiment hyper-parameters
-  epochs: 150                              
-  batch_size: 200                          # using Matched dataset - true global batch size is 4x this (e.g. 768 if 192)
-  step_lr: 50                              
+  epochs: 100                              
+  batch_size: 192                          # using Matched dataset - true global batch size is 4x this (e.g. 768 if 192)
+  step_lr: 10                              
   optimizer: "AdamW"
   optimizer_kwargs:
     lr: 0.001                            # initial LR 

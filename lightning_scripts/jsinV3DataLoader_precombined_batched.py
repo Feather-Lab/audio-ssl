@@ -339,6 +339,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             batch_size=1,
             transform=None,
             target_keys=None,
+            blocked_batches=True,
             overfit=False,
     ):
         super().__init__()
@@ -353,6 +354,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.num_noise_files = len(self.noise_metadata)
         self.batch_size = batch_size
         self.target_keys = target_keys
+        self.blocked_batches = blocked_batches
     
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000)
@@ -373,7 +375,14 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         return len(self.speech_metadata) // (2 * self.batch_size)
     
     def __getitem__(self, idx):
-        speech_ixs = np.arange(idx, idx + self.batch_size * 2)
+        # Modify so batches are not sliding windows over dataset 
+        if self.blocked_batches:
+            start = idx * self.batch_size * 2 
+            end = start + self.batch_size * 2 
+        else:
+            start = idx 
+            end = idx + self.batch_size * 2 
+        speech_ixs = np.arange(start, end)
 
         noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
         noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)

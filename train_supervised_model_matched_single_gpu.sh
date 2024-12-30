@@ -2,16 +2,15 @@
 #SBATCH --job-name=train_supervised
 #SBATCH --output=outLogs/train_word_aud_supervised_matched_%j.out
 #SBATCH --error=outLogs/train_word_aud_supervised_matched_%j.err
-#SBATCH --ntasks-per-node=4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=14
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-gpu=16
 
-#SBATCH --mem=100Gb
-#SBATCH --time=3:00:00
+#SBATCH --mem=32Gb
+#SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
-#SBATCH -x workergpu156
 
 module purge
 module load cuda cudnn nccl
@@ -30,7 +29,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 
-srun --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/word_speaker_audioset_resnet18_MatchedDataset_AdamW_shuffle_train.yaml \
+srun --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/word_speaker_audioset_resnet18_MatchedDataset_shuffle_one_gpu.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 

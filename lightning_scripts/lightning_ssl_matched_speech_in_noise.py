@@ -81,6 +81,7 @@ class LitAudioSSL(L.LightningModule):
             self.metrics = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
                         for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()}) 
         
+        self.init_train_log = True 
 
     def _step(self, batch, batch_idx, step_type):
         if self.opt_supervised_task: 
@@ -103,8 +104,8 @@ class LitAudioSSL(L.LightningModule):
             # concat is handled in the paired loss function 
             loss_ssl, inv_loss, eq_loss = self.ssl_loss(out_11, out_12, out_21, out_22)
 
-            self.log(f"{step_type}_inv_loss", inv_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-            self.log(f"{step_type}_eq_loss", eq_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_inv_loss", inv_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+            self.log(f"{step_type}_eq_loss", eq_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
 
         else:
             if self.ssl_task == 'word':
@@ -134,13 +135,14 @@ class LitAudioSSL(L.LightningModule):
             class_loss_22, task_loss_22 = self.multi_task_loss(logits_22, labels_22, return_indiv_loss=True)
 
             total_class_loss = (class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22) / 4.0 
+            self.log(f"{step_type}_total_class_loss", total_class_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
             for task, metric in self.metrics.items():
                 # Add acc per task 
                 task_loss = task_loss_11[task] + task_loss_12[task] + task_loss_21[task] + task_loss_22[task]
                 task_loss = task_loss / 4.0
 
-                self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+                self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
                 acc = 0
                 acc += metric(logits_11[task], labels_11[task]).item()
@@ -150,9 +152,9 @@ class LitAudioSSL(L.LightningModule):
                 acc /= 4.0  
 
                 if 'signal' in task:
-                    self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+                    self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
                 else:
-                    self.log(f"{step_type}_{task}_prec", acc, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+                    self.log(f"{step_type}_{task}_prec", acc, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
 
 
 
@@ -244,6 +246,14 @@ class LitAudioSSL(L.LightningModule):
             return total_norm
         grad_norm = _get_grad_norm(self.model.parameters())
         self.log("grad_norm", torch.tensor(grad_norm), prog_bar=True, on_step=True, on_epoch=False)
+
+    def  on_validation_epoch_start(self):
+        if  self.init_train_log:
+            print("This is the first step after restoring from a checkpoint!")
+            ### Hack to log train_total_loss when resuming from checkpoint 
+            self.log(f"train_total_loss", 100.0, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.init_train_log = False 
+
 
     def forward(self, x):
         """

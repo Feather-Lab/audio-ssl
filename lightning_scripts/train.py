@@ -20,6 +20,9 @@ from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatc
 from lightning_ssl_imagenet import LitImageSSL 
 from lightning_ssl_audioset import LitAudioSetSSL
 
+from lightning.pytorch.strategies import DDPStrategy
+from lightning.pytorch.plugins.environments import SLURMEnvironment
+
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -112,6 +115,17 @@ def cli_main(args):
             save_weights_only=False,
             verbose=True,
         ))
+        callbacks.append(ModelCheckpoint(
+            checkpoint_dir,
+            monitor="val_loss",
+            filename="{epoch}-{step}-best_train",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=False,
+            verbose=True,
+        ))
+        val_loss_to_stop_on = "val_loss"
+
     else:
         callbacks.append(ModelCheckpoint(
             checkpoint_dir,
@@ -131,13 +145,13 @@ def cli_main(args):
             save_weights_only=False,
             verbose=True,
         ))
-        # val_loss_to_stop_on = "val_loss"
+        val_loss_to_stop_on = "val_total_loss"
 
 
     ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-    ckpt_path=None
-    if args.resume_training and len(ckpt_paths) != 0:
-        ckpt_path = ckpt_paths[-1]
+    ckpt_path = None if args.ckpt_path == '' else args.ckpt_path
+    if args.resume_training and (len(ckpt_paths) != 0 or ckpt_path):
+        ckpt_path = ckpt_paths[-1] if ckpt_path is None else ckpt_path 
         model = module.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         print('Resuming training from checkpoint: ', ckpt_path)
     else:
@@ -153,7 +167,7 @@ def cli_main(args):
     wandb_logger.watch(model.model, log="all",)
     # Early stopping to save compute
     # if val loss does not improve by 0.1 for 3 epochs (default), end training 
-    # callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.1))
+    # callbacks.append(EarlyStopping(monitor=val_loss_to_stop_on, mode="min", min_delta=0.01))
 
     grad_clip = config['hparas'].get('gradient_clip_val', 1) if not config['hparas'].get('sep_class_opt', False) else False
     trainer = L.Trainer(
@@ -165,11 +179,14 @@ def cli_main(args):
         devices=args.gpus,
         accelerator="gpu", 
         strategy='ddp',
+        # strategy=DDPStrategy(process_group_backend="gloo"),
         gradient_clip_val=grad_clip, # clipt grad l2 norm to 1 
         # limit_train_batches=2,
         # limit_val_batches=2,
         # val_check_interval=config['hparas']['valid_step'], # just validate every epoch 
+        # check_val_every_n_epoch=5 if ("Matched" in config_path.stem) else 1, 
         profiler=None,
+        plugins=[SLURMEnvironment(auto_requeue=False)], # so errors actually crash job 
         callbacks=callbacks)
     
     trainer.fit(model, ckpt_path=ckpt_path if args.resume_training else None)

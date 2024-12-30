@@ -71,24 +71,26 @@ class LitWordAudioSetModel(L.LightningModule):
 
     def _step(self, batch, batch_idx, step_type):
         audio, label_dict = batch
-        # logits will be dict - keys for each task
         logits = self.model(audio)
 
         # get classification loss
         loss, task_loss_dict = self.multi_task_loss(logits, label_dict, return_indiv_loss=True)
-        self.log(f"{step_type}_loss", loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+        self.log(f"{step_type}_loss", loss.detach(), prog_bar=True)
         
         # calc acc, add acc and task loss to log
         for task, task_loss in task_loss_dict.items():
             task_acc = self.accuracy[step_type][task](logits[task], label_dict[task])
             # format task str for logging: remove 'noise/' or 'signal/' from str
-            self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
-            self.log(f"{step_type}_{task}_acc", task_acc, on_step=False ,
-                                                          on_epoch=True,
-                                                          prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_{task}_loss", task_loss.detach(),
+                                            #  on_step=True, on_epoch=False,
+                                             prog_bar=True, sync_dist=False if step_type == 'train' else True)
+            self.log(f"{step_type}_{task}_acc", task_acc,
+                                                        #  on_step=True,
+                                                        #   on_epoch=False,
+                                                          prog_bar=False, sync_dist=False if step_type == 'train' else True)
         # log current learning rate 
-        lr = self.schedule.get_last_lr()[0]
-        self.log(f"lr", lr, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
+        # lr = self.schedule.get_last_lr()[0]
+        # self.log(f"lr", lr, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)
 
         return loss
 
@@ -163,7 +165,7 @@ class LitWordAudioSetModel(L.LightningModule):
             num_workers=self.config['num_workers'], 
             pin_memory=True,
             # persistent_workers=True,
-            shuffle=False,
+            shuffle=True,
             collate_fn=self.collate_fn,
         )
         return train_dataloader

@@ -21,7 +21,7 @@ val_metric_mode: 'max'
 
 hparas:
   epochs: 100
-  global_batch_size: 320
+  global_batch_size: 640 #320
   lambda_ssl: 1
   lr: 0.4
   num_warmup_steps_or_ratio: 0.1
