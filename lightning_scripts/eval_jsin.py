@@ -5,6 +5,8 @@ import sys, os
 import pickle
 from lightning_classifier import LitWordAudioSetModel 
 from lightning_ssl import LitAudioSSL 
+from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
+
 from pathlib import Path 
 import pathlib
 from argparse import ArgumentParser

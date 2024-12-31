@@ -294,6 +294,7 @@ class LitAudioSSL(L.LightningModule):
                                                      db_spl=self.config['audio_transforms']['dbspl'],
                                                      batch_size=self.config['hparas']['batch_size'],
                                                      target_keys=self.config['data'].get("target_keys", None),
+                                                     blocked_batches=self.config['data'].get("blocked_batches", False),
                                                      )
         
         train_dataloader = torch.utils.data.DataLoader(
@@ -302,7 +303,7 @@ class LitAudioSSL(L.LightningModule):
             num_workers=self.config['num_workers'], 
             pin_memory=True,
             # persistent_workers=True,
-            shuffle=False,
+            shuffle=True,
             collate_fn=self.collate_fn
         )
         return train_dataloader

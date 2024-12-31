@@ -4,15 +4,20 @@ from torch import nn
 from torchmetrics.classification import Accuracy, BinaryPrecision
 import torch.nn.functional as F
 import lightning as L
+from typing import List, Union, Tuple
 
 import sys
-sys.path.append('./lightning_scripts/')
+
 import robustness.audio_models as architectures
 import robustness.audio_functions.audio_transforms as at 
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
 
+sys.path.append('./lightning_scripts/')
+from audio_ssl.misc import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import MatchedSpeechInNoiseDatasetBatched
+
+
 
 class ModelWithFrontEnd(nn.Module):
     def __init__(self,front_end, model):
@@ -118,14 +123,43 @@ class LitWordAudioSetModel(L.LightningModule):
 
     def configure_optimizers(self):
         # Optimizer
-        opt = getattr(torch.optim, self.config['hparas']['optimizer'])
-        self.optimizer = opt(self.model.parameters(),  **self.config['hparas']['optimizer_kwargs'])     
-        self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
-              
-        return [self.optimizer],   {
-                    'scheduler': self.schedule,  # The LR scheduler instance (required)
-                    'interval': 'epoch',  # The unit of the scheduler's step size
+        if self.config['hparas']['optimizer'] == "LARS":
+            # Typical learning rate scheduling is handled in CosineWarmupScheduler
+            # as init_lr * batchsize / 256
+            # lr given to LARS is 0
+            #  CosineWarmupScheduler handles incrementing the LR
+            self.optimizer = LARS(
+                            self.model.parameters(),
+                            lr=0,
+                            weight_decay=1e-6,
+                            momentum=0.9,
+                            weight_decay_filter=True,
+                            lars_adaptation_filter=True,
+                        )
+            total_training_steps = self.total_training_steps()
+            num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
+            lr_scheduler = CosineWarmupScheduler(
+                optimizer=self.optimizer,
+                batch_size=self.config['hparas']['global_batch_size'], # is global batch size
+                warmup_steps=num_warmup_steps,
+                max_steps=total_training_steps,
+                lr=self.config['hparas']['lr']
+            )
+            return [self.optimizer], [
+                {
+                    'scheduler': lr_scheduler,  # The LR scheduler instance (required)
+                    'interval': 'step',  # The unit of the scheduler's step size
                 }
+            ]    
+
+        else:
+            opt = getattr(torch.optim, self.config['hparas']['optimizer'])
+            self.optimizer = opt(self.model.parameters(),  **self.config['hparas']['optimizer_kwargs'])     
+            self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
+            return [self.optimizer],   {
+                        'scheduler': self.schedule,  # The LR scheduler instance (required)
+                        'interval': 'epoch',  # The unit of the scheduler's step size
+                    }
 
     def forward(self, x):
         """
@@ -190,3 +224,17 @@ class LitWordAudioSetModel(L.LightningModule):
         )
         return dataloader
 
+    # @property
+    def total_training_steps(self) -> int:
+        dataset_size = len(self.train_dataloader())
+        num_devices = self.config['num_gpus']
+        effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
+        max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
+
+        if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps and self.trainer.max_steps != -1:
+            return int(self.trainer.max_steps)
+        return int(max_estimated_steps)
+
+    def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
+        return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
+    
