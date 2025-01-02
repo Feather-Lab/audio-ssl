@@ -135,14 +135,14 @@ class LitAudioSSL(L.LightningModule):
             class_loss_22, task_loss_22 = self.multi_task_loss(logits_22, labels_22, return_indiv_loss=True)
 
             total_class_loss = (class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22) / 4.0 
-            self.log(f"{step_type}_total_class_loss", total_class_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_total_class_loss", total_class_loss.detach(), prog_bar=True, sync_dist=True)
 
             for task, metric in self.metrics.items():
                 # Add acc per task 
                 task_loss = task_loss_11[task] + task_loss_12[task] + task_loss_21[task] + task_loss_22[task]
                 task_loss = task_loss / 4.0
 
-                self.log(f"{step_type}_{task}_loss", task_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+                self.log(f"{step_type}_{task}_loss", task_loss.detach(), prog_bar=True, sync_dist=True)
 
                 acc = 0
                 acc += metric(logits_11[task], labels_11[task]).item()
@@ -152,14 +152,14 @@ class LitAudioSSL(L.LightningModule):
                 acc /= 4.0  
 
                 if 'signal' in task:
-                    self.log(f"{step_type}_{task}_acc", acc, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
+                    self.log(f"{step_type}_{task}_acc", acc,  prog_bar=False, sync_dist=True)
                 else:
-                    self.log(f"{step_type}_{task}_prec", acc, on_step=True, on_epoch=True, prog_bar=False, sync_dist=True)
+                    self.log(f"{step_type}_{task}_prec", acc, prog_bar=False, sync_dist=True)
 
 
 
         total_loss = self.lambda_ssl * loss_ssl + total_class_loss
-        self.log(f"{step_type}_total_loss", total_loss.detach(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log(f"{step_type}_total_loss", total_loss.detach(), prog_bar=True, sync_dist=True)
 
         if 'mmcr' in self.ssl_loss_str:
             # log pretraining percent error (Eq. 4 in https://arxiv.org/pdf/2406.09366):
@@ -167,13 +167,13 @@ class LitAudioSSL(L.LightningModule):
             # lower bound is sqrt(p * min(d,p)); p=points d=dimension
             # Sum because loss is already negative 
             ppe = (self.mmcr_lower_bound + loss_ssl.detach()) / self.mmcr_lower_bound
-            self.log(f"{step_type}_ppe", ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_ppe", ppe, prog_bar=True, sync_dist=True)
 
         if 'paired' in self.ssl_loss_str and self.inv_loss_type == "MMCR_Loss" and self.eq_loss_type == "MMCR_Loss":
             inv_ppe = (self.mmcr_lower_bound + inv_loss.detach()) / self.mmcr_lower_bound
-            self.log(f"{step_type}_inv_ppe", inv_ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_inv_ppe", inv_ppe, prog_bar=True, sync_dist=True)
             eq_ppe = (self.mmcr_lower_bound + eq_loss.detach()) / self.mmcr_lower_bound
-            self.log(f"{step_type}_eq_ppe", eq_ppe, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+            self.log(f"{step_type}_eq_ppe", eq_ppe, prog_bar=True, sync_dist=True)
 
         # add acc to log 
         return total_loss
@@ -223,7 +223,7 @@ class LitAudioSSL(L.LightningModule):
                 self.optimizer = LARS(
                                 self.model.parameters(),
                                 lr=lr,
-                                weight_decay=1e-5,
+                                weight_decay=1e-6,
                                 momentum=0.9,
                                 weight_decay_filter=True,
                                 lars_adaptation_filter=True,

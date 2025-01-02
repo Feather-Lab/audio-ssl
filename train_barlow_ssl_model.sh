@@ -2,12 +2,12 @@
 #SBATCH --job-name=word_ssl
 #SBATCH --output=outLogs/barlow_dualtask_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.out
 #SBATCH --error=outLogs/barlow_dualtask_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.err
-#SBATCH --ntasks-per-node=4
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=12
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-gpu=16
 
-#SBATCH --mem=200Gb
-#SBATCH --time=03:00:00
+#SBATCH --mem=48Gb
+#SBATCH --time=1-00:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
@@ -53,10 +53,9 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                   # --resume_training 
 
-srun --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_dualtask_resnet18_base_Matched.yaml \
+srun --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_dualtask_resnet18_base_Matched_blocked_batches.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
-                                   --ckpt_path model_checkpoints/barlow_dualtask_resnet18_base_Matched/checkpoints/epoch=19-step=3600-best_train.ckpt \
-                                  --resume_training 
+                                #   --resume_training 
 
 

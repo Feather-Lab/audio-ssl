@@ -8,9 +8,11 @@ from lightning_ssl import LitAudioSSL
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import BinaryPrecision
-
+import robustness.audio_functions.audio_transforms as at
+from tqdm import tqdm
 from pathlib import Path 
 import pathlib
+import numpy as np 
 from argparse import ArgumentParser
 
 torch.set_float32_matmul_precision('high')
@@ -30,7 +32,6 @@ def collate_fn(batch):
     for (speech, noise) in zip(*batch[:2]):
         speech = transforms(speech, None)[0]
         noise = transforms(noise, None)[0]
-
         # Temp hack - use silence for "None" labeled examples
         # Will mask in metric calculation
         if speech is None:
@@ -98,15 +99,15 @@ def cli_main(args):
     model_speaker_key = [key for key in config['data']['target_keys'] if 'speaker' in key][0]
     model_noise_key = [key for key in config['data']['target_keys'] if 'noise' in key][0]
 
-    val_dataset = jsinV3_precombined_all_signals(root=self.config['data']['root'],
+    val_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
                                                  train=False,
                                                  transform=None,
-                                                 batch_size=self.config['hparas']['batch_size'],
+                                                 batch_size=config['hparas']['batch_size'],
                                                  eval_max=-1)
     dataloader = torch.utils.data.DataLoader(
                                             val_dataset,
                                             batch_size=1,
-                                            num_workers=self.config['num_workers'],
+                                            num_workers=config['num_workers'],
                                             shuffle=False,
                                             collate_fn=collate_fn)
     prec = BinaryPrecision()
@@ -129,7 +130,7 @@ def cli_main(args):
             ### Get noise label outs 
             noise_logits = model(noise.cuda())[model_noise_key].cpu()
             noise_prec.append(prec(noise_logits, labels['noise/labels_binary_via_int']).item())
-            
+
     word_mean = np.mean(word_acc)
     speaker_mean = np.mean(speaker_acc)
     noise_mean = np.mean(noise_prec)
@@ -139,11 +140,16 @@ def cli_main(args):
         'speaker_task_mean': speaker_mean,
         'noise_task_mean': noise_mean,
     }
-    print(output_dict)
+
+    print("Results:")
+    for task_key, metric in output_dict.items():
+        print(f"{task_key}: {metric:.3f}")
+
     # save results as .pkl 
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     results_filename = results_dir / f"{config_path.stem}_eval_jsiv3_all_tasks.pkl"
+    print(f"Saving results to {results_filename}")
     with open(results_filename, 'wb') as handle:
         pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
           
@@ -157,6 +163,12 @@ if __name__ == "__main__":
         default=pathlib.Path("./model_checkpoints"),
         type=pathlib.Path,
         help="Directory where model checkpoints exists. (Default: './model_checkpoints')",
+    )
+    parser.add_argument(
+        "--results_dir",
+        default=pathlib.Path("./eval_jsin_results"),
+        type=pathlib.Path,
+        help="Directory where model results will be saved. (Default: './eval_jsin_results')",
     )
     parser.add_argument(
         "--ckpt_path",
