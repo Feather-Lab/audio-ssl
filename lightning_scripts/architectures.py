@@ -57,6 +57,45 @@ class SSLBaseModel(nn.Module):
         return feature, out, logits
 
 
+class SSLBaseModelSingleTask(nn.Module):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
+        super().__init__()
+        self.supervised = supervised
+        self.backbone = backbone
+
+        self.f = robustness_architectures.__dict__[backbone]()
+        self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+        self.f.fc = nn.Identity()
+
+        # projection head (Following exactly barlow twins offical repo)
+        ## Assumes same dims for inv and equi tasks 
+        projector_dims = [proj_out_dim] + projector_dims
+        self.g_inv = ProjectionHead(projector_dims)
+        if supervised:
+            if isinstance(num_classes, dict): # Make multiple fully conected layers
+                all_fc_layers = {}
+                for task in num_classes.keys():
+                    all_fc_layers[task] = nn.Linear(proj_out_dim, num_classes[task]) 
+                self.lin_cls = nn.ModuleDict(all_fc_layers)
+            else:
+                self.lin_cls = nn.Linear(proj_out_dim, num_classes)
+
+    def forward(self, x):
+        x = self.f(x)
+        feature = torch.flatten(x, start_dim=1)
+        inv_out = self.g_inv(feature)
+        if not self.supervised:
+            return feature, inv_out, None 
+        else:
+            if isinstance(self.lin_cls, nn.ModuleDict): 
+                logits = {}
+                for task, fc_l in self.lin_cls.items():
+                    logits[task] = fc_l(feature.detach())
+            else:
+                logits = self.lin_cls(feature.detach())
+        return feature, inv_out, logits
+        
+
 class SSLBaseModelDualTask(nn.Module):
     def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
         super().__init__()

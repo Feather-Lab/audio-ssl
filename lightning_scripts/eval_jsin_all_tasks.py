@@ -6,6 +6,7 @@ import pickle
 from lightning_classifier import LitWordAudioSetModel 
 from lightning_ssl import LitAudioSSL 
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
+from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import BinaryPrecision
 import robustness.audio_functions.audio_transforms as at
@@ -82,9 +83,13 @@ def cli_main(args):
 
 
     #TODO: Update import logic for all modules needed 
-
-    if 'ssl' in config_path.stem:
-        module = LitAudioSSL
+    ssl_model = False
+    if any(task_str in config_path.stem for task_str in ['ssl', 'imagenet', 'barlow', 'mmcr']):
+        ssl_model = True 
+        if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+            module = LitAudioSSLMatched
+        else:
+            module = LitAudioSSL
 
     elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
         module = LitWordAudioSetModelMatched 
@@ -113,7 +118,9 @@ def cli_main(args):
     prec = BinaryPrecision()
 
     word_acc = []
+    word_top5_acc = []
     speaker_acc = []
+    speaker_top5_acc = []
     noise_prec = []
     with torch.no_grad():
         for batch in tqdm(dataloader):
@@ -121,24 +128,37 @@ def cli_main(args):
             ### Get word and speaker outs
             speech_logits = model(speech.cuda())
 
-            word_preds = speech_logits[model_word_key].softmax(-1).argmax(-1).cpu()
-            speaker_preds = speech_logits[model_speaker_key].softmax(-1).argmax(-1).cpu()
+            # unbox ssl model ouptuts
+            if ssl_model:
+                _, _, speech_logits = speech_logits
 
-            word_acc.append((word_preds == labels["signal/word_int"]).numpy().mean()) 
-            speaker_acc.append((speaker_preds == labels["signal/speaker_int"]).numpy().mean()) 
+            word_preds = speech_logits[model_word_key].softmax(-1).cpu()
+            speaker_preds = speech_logits[model_speaker_key].softmax(-1).cpu()
 
-            ### Get noise label outs 
-            noise_logits = model(noise.cuda())[model_noise_key].cpu()
+            word_acc.append((word_preds.argmax(-1) == labels["signal/word_int"]).numpy().mean()) 
+            speaker_acc.append((speaker_preds.argmax(-1) == labels["signal/speaker_int"]).numpy().mean()) 
+
+            # Run top 5 for talker
+            word_top5 = torch.isin(torch.topk(word_preds, k=5, dim=-1).indices, labels["signal/word_int"]).any(-1).numpy().mean()
+            word_top5_acc.append(word_top5)
+            # Run top 5 for talker
+            speaker_top5 = torch.isin(torch.topk(speaker_preds, k=5, dim=-1).indices, labels["signal/speaker_int"]).any(-1).numpy().mean()
+            speaker_top5_acc.append(speaker_top5)
+
+            ### Get noise signal outs 
+            noise_logits = model(noise.cuda())
+            if ssl_model:
+                _, _, noise_logits = noise_logits
+            noise_logits = noise_logits[model_noise_key].cpu()
             noise_prec.append(prec(noise_logits, labels['noise/labels_binary_via_int']).item())
 
-    word_mean = np.mean(word_acc)
-    speaker_mean = np.mean(speaker_acc)
-    noise_mean = np.mean(noise_prec)
 
     output_dict = {
-        'word_task_mean': word_mean,
-        'speaker_task_mean': speaker_mean,
-        'noise_task_mean': noise_mean,
+        'word_task_mean': np.mean(word_acc),
+        'word_task_top5': np.mean(word_top5_acc),
+        'speaker_task_mean': np.mean(speaker_acc),
+        'speaker_task_top5': np.mean(speaker_top5_acc),
+        'noise_task_mean': np.mean(noise_prec),
     }
 
     print("Results:")
