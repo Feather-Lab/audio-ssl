@@ -304,7 +304,8 @@ class LitAudioSSL(L.LightningModule):
             pin_memory=True,
             # persistent_workers=True,
             shuffle=True,
-            collate_fn=self.collate_fn
+            collate_fn=self.collate_fn,
+            drop_last=True
         )
         return train_dataloader
     
@@ -322,9 +323,11 @@ class LitAudioSSL(L.LightningModule):
             batch_size=1,
             num_workers=self.config['num_workers'],
             shuffle=False,
-            collate_fn=self.collate_fn
+            collate_fn=self.collate_fn,
+            # drop_last=True
 
         )
+        print(f"Rank {self.trainer.local_rank} N training batches {len(dataloader)}")
         return dataloader
 
     # @property
