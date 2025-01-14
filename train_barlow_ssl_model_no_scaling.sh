@@ -4,7 +4,7 @@
 #SBATCH --error=outLogs/barlow_word_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=10
+#SBATCH --cpus-per-gpu=4
 
 #SBATCH --mem=512Gb
 #SBATCH --time=12:00:00
@@ -70,9 +70,9 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                   --resume_training 
 
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_base_Matched_blocked_batches_lmbda_1e-1_large_batch_no_scale.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_base_Matched_blocked_batches_lmbda_1e-1_large_batch_no_scale_v01.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
-                                #   --resume_training 
+                                  --resume_training 
 
 

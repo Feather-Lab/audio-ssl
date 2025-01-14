@@ -44,7 +44,7 @@ def cli_main(args):
 
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     # set num_workers from cl args as total workers // gpus 
-    config['num_workers'] = args.num_workers // args.gpus
+    config['num_workers'] = (args.num_workers // args.gpus) - 1 # let 1 worker handle the process for each gpu
     config['num_gpus'] = args.gpus
     # set batch size per task as global_batch // gpus 
 

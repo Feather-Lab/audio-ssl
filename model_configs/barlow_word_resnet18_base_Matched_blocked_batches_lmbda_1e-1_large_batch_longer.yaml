@@ -22,7 +22,7 @@ val_metric_mode: 'max'
 
 hparas:
   epochs: 250
-  global_batch_size: 512 #320
+  global_batch_size: 640 #320
   lambda_ssl: 1
   lr: 0.2
   num_warmup_steps_or_ratio: 0.01
@@ -33,7 +33,6 @@ hparas:
   ssl_loss_kwargs:
     lmbda: 0.1
     out_dim: 512
-    scale_loss: 1
 
   valid_step: 5000
   task_loss_params:
