@@ -95,15 +95,23 @@ def cli_main(args):
         module = LitWordAudioSetModelMatched 
 
     else:
-        module = LitWordAudioSetModelMatched
+        module = LitWordAudioSetModel
     
     model = module.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     model = model.eval().cuda()
 
-    model_word_key = [key for key in config['data']['target_keys'] if 'word' in key][0]
-    model_speaker_key = [key for key in config['data']['target_keys'] if 'speaker' in key][0]
-    model_noise_key = [key for key in config['data']['target_keys'] if 'noise' in key][0]
-
+    ### Get task key(s) for run 
+    if args.task_to_run == 'all':
+        model_word_key = [key for key in config['data']['target_keys'] if 'word' in key][0]
+        model_speaker_key = [key for key in config['data']['target_keys'] if 'speaker' in key][0]
+        model_noise_key = [key for key in config['data']['target_keys'] if 'noise' in key][0]
+    elif args.task_to_run == 'audioset':
+        task_label_key = 'noise/labels_int'
+    elif args.task_to_run == 'speaker':
+        task_label_key = 'signal/speaker_int'
+    elif args.task_to_run == 'word':
+        task_label_key = 'signal/word_int'
+    
     val_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
                                                  train=False,
                                                  transform=None,
@@ -117,49 +125,79 @@ def cli_main(args):
                                             collate_fn=collate_fn)
     prec = BinaryPrecision()
 
-    word_acc = []
-    word_top5_acc = []
-    speaker_acc = []
-    speaker_top5_acc = []
-    noise_prec = []
+    if args.task_to_run == 'all':
+        word_acc = []
+        word_top5_acc = []
+        speaker_acc = []
+        speaker_top5_acc = []
+        noise_prec = []
+    else:
+        task_acc = []
+        task_top5 =[]
+
     with torch.no_grad():
         for batch in tqdm(dataloader):
             speech, noise, labels = batch
-            ### Get word and speaker outs
-            speech_logits = model(speech.cuda())
 
-            # unbox ssl model ouptuts
-            if ssl_model:
-                _, _, speech_logits = speech_logits
+            if args.task_to_run == 'all':
+                ### Get word and speaker outs
+                speech_logits = model(speech.cuda())
 
-            word_preds = speech_logits[model_word_key].softmax(-1).cpu()
-            speaker_preds = speech_logits[model_speaker_key].softmax(-1).cpu()
+                # unbox ssl model ouptuts
+                if ssl_model:
+                    _, _, speech_logits = speech_logits
 
-            word_acc.append((word_preds.argmax(-1) == labels["signal/word_int"]).numpy().mean()) 
-            speaker_acc.append((speaker_preds.argmax(-1) == labels["signal/speaker_int"]).numpy().mean()) 
+                word_preds = speech_logits[model_word_key].softmax(-1).cpu()
+                speaker_preds = speech_logits[model_speaker_key].softmax(-1).cpu()
 
-            # Run top 5 for talker
-            word_top5 = torch.isin(torch.topk(word_preds, k=5, dim=-1).indices, labels["signal/word_int"]).any(-1).numpy().mean()
-            word_top5_acc.append(word_top5)
-            # Run top 5 for talker
-            speaker_top5 = torch.isin(torch.topk(speaker_preds, k=5, dim=-1).indices, labels["signal/speaker_int"]).any(-1).numpy().mean()
-            speaker_top5_acc.append(speaker_top5)
+                word_acc.append((word_preds.argmax(-1) == labels["signal/word_int"]).numpy().mean()) 
+                speaker_acc.append((speaker_preds.argmax(-1) == labels["signal/speaker_int"]).numpy().mean()) 
 
-            ### Get noise signal outs 
-            noise_logits = model(noise.cuda())
-            if ssl_model:
-                _, _, noise_logits = noise_logits
-            noise_logits = noise_logits[model_noise_key].cpu()
-            noise_prec.append(prec(noise_logits, labels['noise/labels_binary_via_int']).item())
+                # Run top 5 for talker
+                word_top5 = torch.isin(torch.topk(word_preds, k=5, dim=-1).indices, labels["signal/word_int"]).any(-1).numpy().mean()
+                word_top5_acc.append(word_top5)
+                # Run top 5 for talker
+                speaker_top5 = torch.isin(torch.topk(speaker_preds, k=5, dim=-1).indices, labels["signal/speaker_int"]).any(-1).numpy().mean()
+                speaker_top5_acc.append(speaker_top5)
 
+                ### Get noise signal outs 
+                noise_logits = model(noise.cuda())
+                if ssl_model:
+                    _, _, noise_logits = noise_logits
+                noise_logits = noise_logits[model_noise_key].cpu()
+                noise_prec.append(prec(noise_logits, labels['noise/labels_binary_via_int']).item())
 
-    output_dict = {
-        'word_task_mean': np.mean(word_acc),
-        'word_task_top5': np.mean(word_top5_acc),
-        'speaker_task_mean': np.mean(speaker_acc),
-        'speaker_task_top5': np.mean(speaker_top5_acc),
-        'noise_task_mean': np.mean(noise_prec),
-    }
+            else:
+                if args.task_to_run in ['word', 'speaker']:
+                    logits = model(speech.cuda())
+                elif args.task_to_run == 'audioset':
+                    logits = model(noise.cuda())
+                # unbox ssl model ouptuts
+                if ssl_model:
+                    _, _, logits = logits
+                # get batch scores
+                if args.task_to_run in ['word', 'speaker']:
+                    task_preds = logits[task_label_key].softmax(-1).cpu()
+                    task_acc.append((task_preds.argmax(-1) == labels[task_label_key]).numpy().mean()) 
+                    batch_top5 = torch.isin(torch.topk(task_preds, k=5, dim=-1).indices, labels[task_label_key]).any(-1).numpy().mean()
+                    task_top5.append(batch_top5)
+                elif args.task_to_run == 'audioset':
+                    task_acc.append(prec(logits, labels[task_label_key]).item())
+
+    if args.task_to_run == 'all':
+        output_dict = {
+            'word_task_mean': np.mean(word_acc),
+            'word_task_top5': np.mean(word_top5_acc),
+            'speaker_task_mean': np.mean(speaker_acc),
+            'speaker_task_top5': np.mean(speaker_top5_acc),
+            'noise_task_mean': np.mean(noise_prec),
+        }
+    else:
+        output_dict = {
+            f"{args.task_to_run}_task_mean": np.mean(task_acc)
+        }
+        if args.task_to_run != 'audioset':
+            output_dict[f"{args.task_to_run}_task_top5"] = np.mean(task_top5)
 
     print("Results:")
     for task_key, metric in output_dict.items():
@@ -168,7 +206,8 @@ def cli_main(args):
     # save results as .pkl 
     results_dir = Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_filename = results_dir / f"{config_path.stem}_eval_jsiv3_all_tasks.pkl"
+    task_str_suffix = f"{args.task_to_run}_tasks" if args.task_to_run == 'all' else f"{args.task_to_run}_task"
+    results_filename = results_dir / f"{config_path.stem}_eval_jsiv3_{task_str_suffix}.pkl"
     print(f"Saving results to {results_filename}")
     with open(results_filename, 'wb') as handle:
         pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -213,6 +252,12 @@ if __name__ == "__main__":
     default=0,
     type=int,
     help="Number of CPUs for dataloader. (Default: 0)",
+    )
+    parser.add_argument(
+        "--task_to_run",
+        default='all',
+        type=str,
+        help="Which task to test. One of (all|word|speaker|audioset). (Default: all)"
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')

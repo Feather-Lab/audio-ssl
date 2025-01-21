@@ -25,14 +25,14 @@ hparas:
   global_batch_size: 640 #320
   lambda_ssl: 1
   lr: 0.2
-  # num_warmup_steps_or_ratio: 0.01
+  num_warmup_steps_or_ratio: 0.01
   optimizer: LARS
   ssl_task: 'word'                            # either 'word', 'audioset', 'dual'
   ssl_loss_str: 'barlow'
   ssl_loss: 'Barlow_Loss'
   ssl_loss_kwargs:
     lmbda: 0.1
-    out_dim: 512
+    out_dim: 8192
 
   valid_step: 5000
   task_loss_params:
@@ -52,7 +52,7 @@ model:
   arch_kwargs:
     backbone: 'resnet18'
     in_channels: 1
-    projector_dims: [512, 512, 512]
+    projector_dims: [8192, 8192]
     proj_out_dim: 512
     num_classes:
       signal/word_int: 794               # TODO: -1 from this if not using null

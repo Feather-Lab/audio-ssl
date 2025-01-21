@@ -28,14 +28,6 @@ matplotlib.rcParams.update({'font.size': 26})
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 
-@dataclass
-class AudioParams:
-    """Track audio params used to load sounds"""
-    samp_rate: int = 20_000
-    dur_sec: int = 2
-
-audio_params = AudioParams()
-
 
 # save the dictionary. 
 def save_obj(obj, name ):
@@ -702,6 +694,7 @@ if __name__ == '__main__':
     from lightning_classifier import LitWordAudioSetModel
     from lightning_ssl import LitAudioSSL
     from lightning_ssl_audioset import LitAudioSetSSL
+    from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 
 
     #########PARSE THE ARGUMENTS FOR THE FUNCTION#########
@@ -767,6 +760,8 @@ if __name__ == '__main__':
         module =  eval(config['module']).load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     elif 'ssl' in config_path.stem:
         module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+        module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     else:
         module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         

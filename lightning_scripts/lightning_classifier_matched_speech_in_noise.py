@@ -51,10 +51,7 @@ class LitWordAudioSetModel(L.LightningModule):
             'layer2',
             'layer3',
             'layer4',
-            'avgpool',
-            'final/signal/word_int',
-            'final/signal/speaker_int',
-            'final/noise/labels_int',
+            'avgpool'
         ]
 
         self.model = ModelWithFrontEnd(self.audio_rep, self.model)
@@ -80,7 +77,7 @@ class LitWordAudioSetModel(L.LightningModule):
 
         # get classification loss
         loss, task_loss_dict = self.multi_task_loss(logits, label_dict, return_indiv_loss=True)
-        self.log(f"{step_type}_loss", loss.detach(), prog_bar=True)
+        self.log(f"{step_type}_loss", loss.detach(), prog_bar=True, sync_dist = True)
         
         # calc acc, add acc and task loss to log
         for task, task_loss in task_loss_dict.items():
@@ -88,11 +85,11 @@ class LitWordAudioSetModel(L.LightningModule):
             # format task str for logging: remove 'noise/' or 'signal/' from str
             self.log(f"{step_type}_{task}_loss", task_loss.detach(),
                                             #  on_step=True, on_epoch=False,
-                                             prog_bar=True, sync_dist=False if step_type == 'train' else True)
+                                             prog_bar=True, sync_dist = True)
             self.log(f"{step_type}_{task}_acc", task_acc,
                                                         #  on_step=True,
                                                         #   on_epoch=False,
-                                                          prog_bar=False, sync_dist=False if step_type == 'train' else True)
+                                                          prog_bar=False, sync_dist = True)
         # log current learning rate 
         # lr = self.schedule.get_last_lr()[0]
         # self.log(f"lr", lr, on_step=True, on_epoch=False, prog_bar=True, sync_dist=True)

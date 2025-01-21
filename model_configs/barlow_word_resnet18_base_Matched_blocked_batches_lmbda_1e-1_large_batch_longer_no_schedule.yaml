@@ -52,7 +52,7 @@ model:
   arch_kwargs:
     backbone: 'resnet18'
     in_channels: 1
-    projector_dims: [512, 512, 512]
+    projector_dims: [512, 512]
     proj_out_dim: 512
     num_classes:
       signal/word_int: 794               # TODO: -1 from this if not using null
