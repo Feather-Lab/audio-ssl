@@ -1,16 +1,16 @@
 #!/bin/bash -l
 #SBATCH --job-name=word_ssl
-#SBATCH --output=outLogs/train_dual_task_mmcr_pilot_%j.out
-#SBATCH --error=outLogs/train_dual_task_mmcr_pilot_%j.err
+#SBATCH --output=outLogs/train_word_task_mmcr_%j.out
+#SBATCH --error=outLogs/train_word_task_mmcr_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=14
+#SBATCH --cpus-per-gpu=16
 
-#SBATCH --mem=100Gb
-#SBATCH --time=12:00:00
+#SBATCH --mem=1000Gb
+#SBATCH --time=6:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --constraint=h100  # if you want a particular type of GPU
+#SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
 
 mamba activate cochdnn_ssl_pl
 
@@ -30,7 +30,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
 
-srun python3 lightning_scripts/train.py --config_path model_configs/pilot_ssl_mmcr_dualtask_resnet50_hparam_set_1_lr_02_LARS_MatchedSpeechInNoiseDatasetBatched.yaml \
+srun python3 lightning_scripts/train.py --config_path model_configs/mmcr_word_resnet18_base_Matched_blocked_batches_lmbda_1e-1_large_batch_longer_no_schedule.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 
