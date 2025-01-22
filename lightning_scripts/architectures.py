@@ -64,8 +64,13 @@ class SSLBaseModelSingleTask(nn.Module):
         self.backbone = backbone
 
         self.f = robustness_architectures.__dict__[backbone]()
-        self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        self.f.fc = nn.Identity()
+        
+        if 'resnet' in backbone:
+            self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+            self.f.fc = nn.Identity()
+        elif 'kell' in backbone:
+            self.f.dropout = nn.Identity()
+            self.f.classification = nn.Identity()
 
         # projection head (Following exactly barlow twins offical repo)
         ## Assumes same dims for inv and equi tasks 

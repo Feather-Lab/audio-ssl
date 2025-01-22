@@ -348,6 +348,8 @@ class LitAudioSSL(L.LightningModule):
     def mmcr_lower_bound(self) -> int:
         # precompute mmcr lower bound as prop 3.3 from https://arxiv.org/pdf/2406.09366
         p = torch.tensor(self.config['hparas']['global_batch_size'])
+        if self.ssl_task == 'word' or self.ssl_task == 'audioset':
+            p *= 2 # account for stacking "paired" examples along batch dimension
         d = torch.tensor(self.config['model']['arch_kwargs']['projector_dims'][-1])
         return torch.sqrt(p * torch.min(p, d))
 
