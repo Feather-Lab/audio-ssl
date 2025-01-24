@@ -1,0 +1,444 @@
+import torch 
+import torch.nn as nn 
+import numpy as np 
+import lightning as L
+import yaml
+import sys, os
+import pickle
+from lightning_ssl import LitAudioSSL 
+from lightning.pytorch.callbacks import ModelCheckpoint
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import WandbLogger
+import robustness.audio_functions.audio_transforms as at 
+
+from audio_ssl.misc import LARS
+from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
+from torchmetrics.classification import Accuracy, BinaryPrecision
+from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
+import pathlib
+from argparse import ArgumentParser, BooleanOptionalAction
+
+torch.set_float32_matmul_precision('medium')
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+
+class SSLClassifier(L.LightningModule):
+    def __init__(self, config, ckpt_path, layer_out):
+        super().__init__()
+        self.config = config
+        self.layer_out = layer_out
+        # init the pretrained LightningModule
+        # Set strict to false to ignore loading in pre-trained classifier 
+        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+        self.feature_extractor = torch.compile(self.feature_extractor)
+        self.feature_extractor.freeze()
+        # softcode size dict at some point 
+
+        if config['model']['arch_kwargs']['backbone'] == 'kell2018':
+            layer_size_dict = {'avgpool':512*9*5,
+                               'relufc':4096}
+            
+        elif config['model']['arch_kwargs']['backbone'] == 'resnet18':
+                layer_size_dict = {'avgpool': 512,
+                                'final': 512}
+        else:
+
+            layer_size_dict = {'input_after_preproc': 211,
+                                'conv1': 6784,
+                                'bn1': 6784,
+                                'conv1_relu1': 6784,
+                                'maxpool1': 3392,
+                                'layer1': 13568,
+                                'layer2': 13824,
+                                'layer3': 14336,
+                                'layer4': 14336,
+                                'avgpool': 2048,
+                                'final': 2048}
+        
+        self.transforms = at.AudioCompose([
+                at.AudioToTensor(),
+                at.DBSPLNormalizeForegroundAndBackground(config['audio_transforms']['dbspl']), ## equivalent to 60dB - softcode
+                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+                ])
+        
+        proj_out_dim = layer_size_dict[layer_out]
+        # init trainable word classifier  
+        num_classes = config['model']['arch_kwargs']['num_classes']
+
+        self.mlp = None
+
+        if config['model'].get('classifier', False):
+            # Classifier is MLP defined by hparas
+            # projection head (Following exactly barlow twins offical repo)
+            hidden_dims = [proj_out_dim] + config['model']['classifier']['hidden_dims']
+            layers = []
+            for i in range(len(hidden_dims)-1):
+                layers.append(
+                    nn.Linear(hidden_dims[i], hidden_dims[i + 1], bias=False)
+                )
+                layers.append(nn.BatchNorm1d(hidden_dims[i + 1]))
+                layers.append(nn.ReLU())
+            proj_out_dim = hidden_dims[-1] 
+            self.mlp = nn.Sequential(*layers)
+        if isinstance(num_classes, dict): # Make multiple fully conected layers
+            all_fc_layers = {}
+            for task in num_classes.keys():
+                all_fc_layers[task] = nn.Linear(proj_out_dim, num_classes[task]) 
+            self.classifier = nn.ModuleDict(all_fc_layers)
+        else:
+            self.classifier = nn.Linear(proj_out_dim, num_classes)
+
+        self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
+                                                      batch_size=None,
+                                                    #   reduction='none'
+                                                    )
+
+        self.accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
+                        for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()}) 
+        
+    def forward(self, x):
+        with torch.no_grad():
+            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=True)
+            activations = all_outputs[self.layer_out]
+            if self.layer_out in [ 'avgpool', 'final', 'relufc']:
+                activations = activations.view(activations.shape[0], -1)
+            else:
+                # time average then flatten
+                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+            activations = activations.detach()
+        if self.mlp:
+            activations = self.mlp(activations)
+        if isinstance(self.classifier, nn.ModuleDict): 
+            logits = {}
+            for task, fc_l in self.classifier.items():
+                logits[task] = fc_l(activations)
+        else:
+            logits = self.classifier(activations)
+        return logits 
+
+    def _step(self, batch, batch_idx, step_type):
+        audio, labels = batch
+        logits = self.forward(audio) 
+        loss, task_loss_dict = self.multi_task_loss(logits, labels, return_indiv_loss=True)
+        self.log(f"{step_type}_loss", loss.detach(), prog_bar=True, sync_dist = True)
+
+        # calc acc, add acc and task loss to log
+        for task, task_loss in task_loss_dict.items():
+            task_acc = self.accuracy[task](logits[task], labels[task])
+            # format task str for logging: remove 'noise/' or 'signal/' from str
+            self.log(f"{step_type}_{task}_loss", task_loss.detach(),
+                                             prog_bar=True, sync_dist = True)
+            self.log(f"{step_type}_{task}_acc", task_acc, prog_bar=False, sync_dist = True)
+        return loss 
+    
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "val")
+    
+    def test_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "test")
+
+    def predict_step(self, batch):
+        audio, labels = batch
+        logits = self.forward(audio) 
+        loss, task_loss_dict = self.multi_task_loss(logits, labels, return_indiv_loss=True)
+        accuracy_dict = {}
+        top5_dict = {}
+        for task, task_loss in task_loss_dict.items():
+            task_acc = self.accuracy[task](logits[task], labels[task])
+            accuracy_dict[task] = task_acc
+            task_top5 = torch.isin(torch.topk(logits[task].softmax(-1), k=5, dim=-1).indices, labels[task]).any(-1).float().mean()
+            top5_dict[task] = task_top5
+        return {"top1":accuracy_dict, "top5":top5_dict}
+
+    def configure_optimizers(self):
+        # Optimizer
+        if self.config['hparas']['optimizer'] == "LARS":
+            lr = self.config['hparas']['lr'] * self.config['hparas']['global_batch_size'] / 256
+            self.optimizer = LARS(
+                            self.classifier.parameters(),
+                            lr=lr,
+                            weight_decay=1e-6,
+                            momentum=0.9,
+                            weight_decay_filter=True,
+                            lars_adaptation_filter=True,
+                        ) 
+        else:
+            opt = getattr(torch.optim, self.config['hparas']['optimizer'])
+            self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr'])     
+        # self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1) 
+        return [self.optimizer] # , [self.schedule]
+    
+    def collate_fn(self, batch):
+        batch = batch[0] # unbox wrapper added by dataloader 
+        signals = []
+        labels = batch[-1] # labels already collated 
+
+        # convert labels to torch tensors 
+        if isinstance(labels, dict):
+            for task_key, task_labels in labels.items():
+                labels[task_key] = torch.from_numpy(task_labels)
+        else:
+            labels = torch.from_numpy(labels) 
+        # Only fit on clean targets 
+        for (signal, noise) in  zip(*batch[:2]):
+            # use transforms pre-defined in feature_extractor - None instead of noise to skip
+            signal, _ = self.feature_extractor.transforms(signal, None)
+            if signal is None:
+                # Signal was none & has null label class 
+                signal = torch.zeros(1,40000)
+            signals.append(signal)
+        signals = torch.cat(signals).unsqueeze(1) # add back channel dim
+        return signals, labels  
+    
+    def train_dataloader(self):
+        # set train dataloader as attr so we can rotate examples every epoch 
+        dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+                                                 train=True,
+                                                 transform=None, # perform transforms in collate_fn
+                                                 batch_size=self.config['hparas']['batch_size'])
+        self.train_dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=self.config['num_workers'], 
+            pin_memory=True,
+            # persistent_workers=True,
+            shuffle=False,
+            collate_fn=self.collate_fn
+        )
+        return self.train_dataloader
+    
+    def val_dataloader(self):
+        dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+                                                 train=False,
+                                                 transform=None,
+                                                 batch_size=self.config['hparas']['batch_size'],
+                                                 eval_max=self.config['data'].get('eval_max', 3))
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=1,
+            num_workers=self.config['num_workers'],
+            shuffle=False,
+            collate_fn=self.collate_fn
+        )
+        return dataloader
+
+
+def cli_main(args):
+    L.seed_everything(args.random_seed)
+
+    if args.config_path != "":
+        config_path = pathlib.Path(args.config_path)
+    elif args.config_list_path != "":
+        with open(args.config_list_path, 'rb') as f:
+            config_dict = pickle.load(f)
+            config_path = pathlib.Path(config_dict[args.array_ix])
+
+    print(f"Evaluating config: {config_path}")
+    config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+
+    # update config for transfer learning task
+    # config['data'] = {}
+    config['num_workers'] = args.num_workers
+    config['hparas']['batch_size'] = args.batch_size
+    config['data']['eval_max'] = 3
+    config['hparas']['optimizer'] = args.optimizer
+    # used 2 gpus for training, mult by 2 for now to get same checkpoint 
+    config['hparas']['lr'] = args.lr 
+    config['hparas']['epochs'] = 3
+    # don't load in classifier head if it exists 
+    config['model']['arch_kwargs']['supervised'] =  False
+    config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794,    
+                                "signal/speaker_int": 433} 
+    
+    # if args.task == "word":
+    #     config['data']['task_label'] = 'signal/word_int'
+
+    # elif args.task == "speaker":
+    #     config['data']['task_label'] = 'signal/speaker_int'
+    #     config['model']['arch_kwargs']['n_classes'] =  433
+
+    config['hparas']['task_loss_params'] = {key:value for key,value in config['hparas']['task_loss_params'].items() if key in config['model']['arch_kwargs']['num_classes'].keys()}
+
+    if args.w_mlp:
+        config['model']['classifier'] = {}
+        config['model']['classifier']['hidden_dims'] = [args.mlp_dim]
+        mlp_str = "_w_mlp"
+    else:
+        mlp_str = ""
+
+    # get checkpoint for ssl model 
+    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
+    if args.ckpt_path == "":
+        ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+        ckpt_path = ckpt_paths[-1] # get latest checkpoint 
+        print(ckpt_path)
+        ckpt_modifier = ''
+
+    else:
+        ckpt_path = args.ckpt_path
+        ckpt_modifier = '_from_best_val_ckpt'
+
+    str_modifier = f"{args.task}_clean_signals_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}{ckpt_modifier}"
+    classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
+
+    module = SSLClassifier(config=config,
+                           ckpt_path=ckpt_path,
+                           layer_out=args.layer_str)
+
+    ## Check if existing classifier_ckpt exists 
+    classifier_ckpts = list(classifier_checkpoint_dir.rglob("*.ckpt"))
+    classifier_ckpt = None 
+
+    if len(classifier_ckpts) > 0:
+        classifier_ckpts = sorted(classifier_ckpts, key=os.path.getctime)
+        classifier_ckpt = torch.load(classifier_ckpts[-1], weights_only=True) # get latest checkpoint 
+        module.load_state_dict(classifier_ckpt['state_dict'])
+        print(f"Loaded classifier from {classifier_ckpts[-1]}")
+
+    callbacks=[]
+    callbacks.append(ModelCheckpoint(
+            classifier_checkpoint_dir,
+            monitor="train_loss",
+            mode="min",
+            save_top_k=1,
+            save_weights_only=True,
+            verbose=True,
+        ))
+    # callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
+
+    wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
+                               name=f"{config_path.stem}_classifier_{str_modifier}",
+                               group='word_classifier_transfer',
+                               project='cochdnn')
+
+    trainer = L.Trainer(
+        precision="32",
+        # limit_val_batches=0,
+        default_root_dir=args.model_ckpt_dir / config_path.stem,
+        max_epochs=config['hparas']['epochs'],
+        devices=args.gpus,
+        accelerator="gpu", 
+        strategy='ddp' if args.gpus > 1 else 'auto',
+        val_check_interval = 2000, 
+        # limit_train_batches=2,
+        # limit_val_batches=2,
+        gradient_clip_val=1, # clipt grad l2 norm to 1 
+        profiler=None,
+        logger=wandb_logger,
+        callbacks=callbacks)   
+    
+    # train classifier if we haven't already, or if overwriting 
+    if not classifier_ckpt or args.overwrite_classifier:
+        # fit classifier 
+        trainer.fit(module)
+
+    # run test 
+    test_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+                                                train=False,
+                                                transform=None,
+                                                batch_size=config['hparas']['batch_size'],
+                                                eval_max=-1)
+
+    test_dataloader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=1,
+        num_workers=config['num_workers'],
+        shuffle=False,
+        collate_fn=module.collate_fn
+    )
+
+    print("Running inference")
+    outputs = trainer.predict(module, test_dataloader, return_predictions=True)
+    # get stats from test 
+    top1_word = []
+    top1_speaker = []
+    top5_word = []
+    top5_speaker = []
+
+    for record in outputs:
+        top1_word.append(record['top1']['signal/word_int'])
+        top1_speaker.append(record['top1']['signal/speaker_int'])
+        top5_word.append(record['top5']['signal/word_int'])
+        top5_speaker.append(record['top5']['signal/speaker_int'])
+    n_examples = len(outputs)
+    
+    output_dict = {
+        "word_top1_mean": torch.stack(top1_word).mean(),
+        "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
+        "speaker_top1_mean": torch.stack(top1_speaker).mean(),
+        "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
+
+        "word_top5_mean": torch.stack(top5_word).mean(),
+        "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
+        "speaker_top5_mean": torch.stack(top5_speaker).mean(),
+        "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
+    }
+    output_dict = {key:val.item() for key,val in output_dict.items()}  
+
+    print(output_dict)
+    # save results as .pkl 
+    results_dir = pathlib.Path(args.results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    results_filename = results_dir / f"{config_path.stem}_linear_eval_jsin_{str_modifier}.pkl"
+    with open(results_filename, 'wb') as handle:
+        pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                       
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument('--config_path', default='', type=str, help='Path to experiment config.')
+    parser.add_argument('--config_list_path', default='', type=str, help='Path to experiment config.')
+    parser.add_argument(
+        "--results_dir",
+        default=pathlib.Path("./eval_jsin_results"),
+        type=pathlib.Path,
+        help="Directory where model results will be saved. (Default: './eval_jsin_results')",
+    )
+    parser.add_argument(
+        "--model_ckpt_dir",
+        default=pathlib.Path("./model_checkpoints"),
+        type=pathlib.Path,
+        help="Directory where model checkpoints exists. (Default: './model_checkpoints')",
+    )
+    parser.add_argument(
+        "--ckpt_path",
+        default='',
+        type=str,
+        help="Test from this checkpoint."
+    )
+    parser.add_argument(
+        "--gpus",
+        default=1,
+        type=int,
+        help="Number of GPUs per node to use for test. (Default: 1)",
+    )
+    parser.add_argument(
+        "--batch_size",
+        default=256,
+        type=int,
+        help="Batch size to use for test. (Default: 256)",
+    )
+    parser.add_argument(
+    "--num_workers",
+    default=0,
+    type=int,
+    help="Number of CPUs for dataloader. (Default: 0)",
+    )
+    parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
+    parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
+    parser.add_argument('--task', default='word', type=str, help='One of: ["word", "speaker"]. Default is "word"')
+    parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
+    parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
+    parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
+    parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
+    parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
+    parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
+
+    parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
+    args = parser.parse_args()
+
+    cli_main(args)

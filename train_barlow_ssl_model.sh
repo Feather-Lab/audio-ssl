@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=word_ssl
-#SBATCH --output=outLogs/barlow_word_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.out
-#SBATCH --error=outLogs/barlow_word_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.err
+#SBATCH --output=outLogs/barlow_word_resnet50_MatchedSpeechInNoiseDatasetBatched_%j.out
+#SBATCH --error=outLogs/barlow_word_resnet50_MatchedSpeechInNoiseDatasetBatched_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=16
@@ -29,7 +29,7 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs visible on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet50_base_Matched_blocked_batches_lmbda_1e-1_large_batch_longer_no_schedule_lr_6e-1.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet50_base_Matched_blocked_batches_lmbda_1e-1_lr_6e-1.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
