@@ -56,11 +56,6 @@ class SSLClassifier(L.LightningModule):
                                 'avgpool': 2048,
                                 'final': 2048}
         
-        self.transforms = at.AudioCompose([
-                at.AudioToTensor(),
-                at.DBSPLNormalizeForegroundAndBackground(config['audio_transforms']['dbspl']), ## equivalent to 60dB - softcode
-                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
-                ])
         
         proj_out_dim = layer_size_dict[layer_out]
         # init trainable word classifier  
@@ -186,6 +181,32 @@ class SSLClassifier(L.LightningModule):
         # Only fit on clean targets 
         for (signal, noise) in  zip(*batch[:2]):
             # use transforms pre-defined in feature_extractor - None instead of noise to skip
+            if self.config.get('with_noise', False):
+                noise = noise
+            else:
+                noise = None 
+            signal, _ = self.feature_extractor.transforms(signal, noise)
+            if signal is None:
+                # Signal was none & has null label class 
+                signal = torch.zeros(1,40000)
+            signals.append(signal)
+        signals = torch.cat(signals).unsqueeze(1) # add back channel dim
+        return signals, labels  
+
+    def eval_collate_fn(self, batch):
+        batch = batch[0] # unbox wrapper added by dataloader 
+        signals = []
+        labels = batch[-1] # labels already collated 
+
+        # convert labels to torch tensors 
+        if isinstance(labels, dict):
+            for task_key, task_labels in labels.items():
+                labels[task_key] = torch.from_numpy(task_labels)
+        else:
+            labels = torch.from_numpy(labels) 
+        # Only fit on clean targets 
+        for (signal, noise) in  zip(*batch[:2]):
+            # use transforms pre-defined in feature_extractor - None instead of noise to skip
             signal, _ = self.feature_extractor.transforms(signal, None)
             if signal is None:
                 # Signal was none & has null label class 
@@ -193,6 +214,7 @@ class SSLClassifier(L.LightningModule):
             signals.append(signal)
         signals = torch.cat(signals).unsqueeze(1) # add back channel dim
         return signals, labels  
+
     
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
@@ -249,6 +271,7 @@ def cli_main(args):
     # used 2 gpus for training, mult by 2 for now to get same checkpoint 
     config['hparas']['lr'] = args.lr 
     config['hparas']['epochs'] = 3
+    config['with_noise'] = args.with_noise
     # don't load in classifier head if it exists 
     config['model']['arch_kwargs']['supervised'] =  False
     config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794,    
@@ -281,8 +304,9 @@ def cli_main(args):
     else:
         ckpt_path = args.ckpt_path
         ckpt_modifier = '_from_best_val_ckpt'
-
-    str_modifier = f"{args.task}_clean_signals_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}{ckpt_modifier}"
+    
+    w_noise_modifier = '_with_noise' if args.with_noise else ""
+    str_modifier = f"word_and_speaker_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}{ckpt_modifier}{w_noise_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     module = SSLClassifier(config=config,
@@ -291,13 +315,21 @@ def cli_main(args):
 
     ## Check if existing classifier_ckpt exists 
     classifier_ckpts = list(classifier_checkpoint_dir.rglob("*.ckpt"))
+    print(f"Existing classifier checkpoints: {classifier_ckpts}")
     classifier_ckpt = None 
 
-    if len(classifier_ckpts) > 0:
-        classifier_ckpts = sorted(classifier_ckpts, key=os.path.getctime)
-        classifier_ckpt = torch.load(classifier_ckpts[-1], weights_only=True) # get latest checkpoint 
+    if len(classifier_ckpts) > 0 and args.classifier_ckpt_path == '':
+        classifier_ckpt_path = sorted(classifier_ckpts, key=os.path.getctime)[-1]
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
         module.load_state_dict(classifier_ckpt['state_dict'])
-        print(f"Loaded classifier from {classifier_ckpts[-1]}")
+        print(f"Loaded classifier from {classifier_ckpt_path}")
+    
+    if args.classifier_ckpt_path != '':
+        classifier_ckpt_path = args.classifier_ckpt_path
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
+        module.load_state_dict(classifier_ckpt['state_dict'])
+        print(f"Loaded classifier from {classifier_ckpt_path}")
+        
 
     callbacks=[]
     callbacks.append(ModelCheckpoint(
@@ -332,9 +364,10 @@ def cli_main(args):
         callbacks=callbacks)   
     
     # train classifier if we haven't already, or if overwriting 
-    if not classifier_ckpt or args.overwrite_classifier:
-        # fit classifier 
-        trainer.fit(module)
+    if not args.eval_only:
+        if not classifier_ckpt or args.overwrite_classifier:
+            # fit classifier 
+            trainer.fit(module)
 
     # run test 
     test_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
@@ -348,7 +381,7 @@ def cli_main(args):
         batch_size=1,
         num_workers=config['num_workers'],
         shuffle=False,
-        collate_fn=module.collate_fn
+        collate_fn=module.eval_collate_fn
     )
 
     print("Running inference")
@@ -411,6 +444,12 @@ if __name__ == "__main__":
         help="Test from this checkpoint."
     )
     parser.add_argument(
+        "--classifier_ckpt_path",
+        default='',
+        type=str,
+        help="Test from this checkpoint."
+    )
+    parser.add_argument(
         "--gpus",
         default=1,
         type=int,
@@ -434,6 +473,7 @@ if __name__ == "__main__":
     parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
+    parser.add_argument('--with_noise', action=BooleanOptionalAction, help='Include noise in training?')
     parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
     parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')

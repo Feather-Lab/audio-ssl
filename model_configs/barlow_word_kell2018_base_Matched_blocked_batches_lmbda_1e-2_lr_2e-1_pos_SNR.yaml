@@ -17,7 +17,7 @@ data:
 val_metric:
     word_task: 'val_signal/word_int_acc'
     speaker_task: 'val_signal/speaker_int_acc'
-    audioset_task: 'val_noise/labels_int_prec'
+    # audioset_task: 'val_noise/labels_int_prec'
 val_metric_mode: 'max'
 
 hparas:
