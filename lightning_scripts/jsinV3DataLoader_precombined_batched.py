@@ -340,6 +340,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             transform=None,
             target_keys=None,
             blocked_batches=True,
+            signal_augment=False,
             overfit=False,
     ):
         super().__init__()
@@ -355,11 +356,13 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.target_keys = target_keys
         self.blocked_batches = blocked_batches
-    
+        self.signal_augment = signal_augment
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000)
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+        if signal_augment:
+            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugment(sampling_rate=20000)
 
     def class_map(self):
         """
@@ -441,14 +444,19 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                         target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
                         target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
             
+            # Apply augments first in case signals sped up or slowed down - rand crop can handle centering / tempo wont alter centering
+            if self.signal_augment:
+                cropped_11, cropped_21 = self.matched_signal_augment(speech_1, speech_2)
+                cropped_12, cropped_22 = self.matched_signal_augment(speech_1, speech_2)
+
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)
             cropped_12, cropped_22 = self.matched_random_crop(speech_1, speech_2)
 
             cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
             cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)
-
-            # randomly mix the speech and noise with the same DBSNR
+            
+             # randomly mix the speech and noise with the same DBSNR
             combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
             combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
 

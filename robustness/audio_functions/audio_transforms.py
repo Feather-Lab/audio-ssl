@@ -2,11 +2,13 @@ import torch
 import torchaudio
 import random
 import numpy as np
+import scipy
 import sys
 import chcochleagram
 from chcochleagram import compression
 from chcochleagram import cochleagram
 from chcochleagram import *
+from torchaudio.sox_effects import apply_effects_tensor
 
 def ch_demean(x, dim=0):
     '''
@@ -761,3 +763,134 @@ class MatchedRandomSignalCrops(torch.nn.Module):
         cropped_2 = signal_2[start_idx_2:start_idx_2+self.crop_length]
 
         return cropped_1, cropped_2
+
+
+class MatchedRandomSignalAugment(torch.nn.Module):
+    """
+    Randomly applies the same set of signal augmentations to two signals. 
+    Samples whether to apply filtering, pitch shifting, or tempo change 
+    augmentations to signals, and the parameters for each augmentation. 
+    """
+    def __init__(self, sampling_rate=20000, out_dur=40000):
+        super().__init__()
+        self.sampling_rate = sampling_rate
+        self.sampling_rate_tensor = torch.tensor(sampling_rate)
+        self.out_dur = out_dur
+    
+    def apply_butterworth_filter(self,
+                                x,
+                                order,
+                                cutoff,
+                                btype='bandpass',
+                                ):
+        """
+        """
+        if isinstance(x, torch.Tensor):
+            x = x.numpy()
+        dtype = x.dtype
+        b, a = scipy.signal.butter(
+            order,
+            cutoff,
+            btype=btype,
+            analog=False,
+            output='ba',
+            fs=self.sampling_rate)
+        x = scipy.signal.lfilter(b, a, x)
+
+        return x.astype(dtype)
+    
+    def apply_sox_augments(self, x, sox_effects):
+        if isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).float()
+        if x.ndim == 1:
+            x = x.unsqueeze(0)
+        x, output_rate = apply_effects_tensor(x.float(), self.sampling_rate_tensor, sox_effects, channels_first=True)
+        assert output_rate == self.sampling_rate, "Sox effects changed sample rate to {output_rate} from {self.sampling_rate}"
+        x = x.squeeze()
+        if len(x) < self.out_dur:
+            pad_dur = (self.out_dur - len(x)) // 2 + 1 
+            x = torch.nn.functional.pad(x, (pad_dur, pad_dur), model='constant', 0)
+        return x
+
+    def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
+        ### Get shared augmentations:
+        filter_kwargs, sox_effects = sample_augments(speech=speech)
+        if print_augments:
+            print(filter_kwargs)
+            print(sox_effects)
+        # apply to signal 1 
+        if len(filter_kwargs) > 0:
+            signal_1 = self.apply_butterworth_filter(signal_1, **filter_kwargs)
+        signal_1 = self.apply_sox_augments(signal_1, sox_effects)
+
+        # apply to signal 2 
+        if len(filter_kwargs) > 0:
+            signal_2 = self.apply_butterworth_filter(signal_2, **filter_kwargs)
+        signal_2 = self.apply_sox_augments(signal_2, sox_effects)
+        return signal_1, signal_2
+
+
+def loguniform(low, high, size=None):
+    """
+    Helper function to draw samples uniformly on a log scale.
+    """
+    return np.exp(np.random.uniform(low=np.log(low), high=np.log(high), size=size))
+
+def sample_augments(speech=True,
+                    sample_rate=20_000,
+                    effect_types = ['filter', 'pitch',  'tempo'],
+                    ):
+    """
+    """
+    # Sample bandpass filter parameters
+    n_effects = np.random.randint(low=0, high=len(effect_types)+1)
+    effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
+    # sample if using filtering
+    dict_kwargs_butterworth = {} 
+    if 'filter' in effect_choice:
+        nyquist = (sample_rate // 2) - 1 # limit must be exactly under and not equal to for filtering 
+        if speech:
+            ## Use frequency ranges that overlap speech signals 
+            range_bandpass_freq_low = [4e1, 4e2]
+            range_bandpass_freq_high = [4e3, 10e3]
+            bandpass_freq_low = loguniform(*range_bandpass_freq_low)
+            bandpass_freq_high = loguniform(*range_bandpass_freq_high)
+        else:
+            ## Can use wider frequency range for non-speech signals
+            range_bandpass_center_frequency = [16e1, 10e3]
+            range_bandpass_bandwidth_octave = [2, 4]
+            bandpass_center_frequency = loguniform(*range_bandpass_center_frequency)
+            bandpass_bandwidth_octave = loguniform(*range_bandpass_bandwidth_octave)
+            bandpass_freq_low = np.power(2, -bandpass_bandwidth_octave/2) * bandpass_center_frequency
+            bandpass_freq_high = np.power(2, bandpass_bandwidth_octave/2) * bandpass_center_frequency
+        # sample order for nth order butterworth filter 
+        list_bandpass_order = [1, 2, 3, 4]
+        bandpass_order_int = np.random.choice(list_bandpass_order)
+        # clip hz based on nyquist 
+        if bandpass_freq_low < 20:
+            bandpass_freq_low = 20 
+        if bandpass_freq_high > nyquist:
+            bandpass_freq_high = nyquist 
+
+        # stack as kwargs dict 
+        dict_kwargs_butterworth = {'order': bandpass_order_int,
+                            'cutoff': [bandpass_freq_low, bandpass_freq_high],
+                            'btype': 'bandpass'
+                            }
+
+    # Sample sox augmentations
+    effects_to_apply = []
+    if n_effects > 0:
+        for effect in effect_choice:
+            if effect == 'pitch':
+                pitch_n_semitones = np.random.uniform(-0.5, 0.5)
+                # pitch args are n semitones
+                effects_to_apply.append(['pitch', f"{pitch_n_semitones}"])
+                # chain resample for identical output from sox 
+                effects_to_apply.append(['rate', f"{sample_rate}"])
+            elif effect == 'tempo':
+                tempo_factor = np.random.uniform(0.90, 1.10)
+                # tempo args are factor
+                effects_to_apply.append(['tempo', f"{tempo_factor}"])
+
+    return dict_kwargs_butterworth, effects_to_apply
