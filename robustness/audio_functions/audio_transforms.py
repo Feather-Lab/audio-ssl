@@ -809,7 +809,7 @@ class MatchedRandomSignalAugment(torch.nn.Module):
         x = x.squeeze()
         if len(x) < self.out_dur:
             pad_dur = (self.out_dur - len(x)) // 2 + 1 
-            x = torch.nn.functional.pad(x, (pad_dur, pad_dur), model='constant', 0)
+            x = torch.nn.functional.pad(x, (pad_dur, pad_dur), mode='constant', value=0)
         return x
 
     def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
