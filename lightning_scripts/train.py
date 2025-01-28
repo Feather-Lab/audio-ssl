@@ -23,6 +23,9 @@ from lightning_ssl_audioset import LitAudioSetSSL
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.plugins.environments import SLURMEnvironment
 
+import logging
+logging.getLogger('sox').setLevel(logging.ERROR)
+
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True

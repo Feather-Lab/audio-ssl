@@ -8,7 +8,9 @@ import chcochleagram
 from chcochleagram import compression
 from chcochleagram import cochleagram
 from chcochleagram import *
-from torchaudio.sox_effects import apply_effects_tensor
+# from torchaudio.sox_effects import apply_effects_tensor
+import sox 
+
 
 def ch_demean(x, dim=0):
     '''
@@ -765,69 +767,96 @@ class MatchedRandomSignalCrops(torch.nn.Module):
         return cropped_1, cropped_2
 
 
-class MatchedRandomSignalAugment(torch.nn.Module):
+class MatchedRandomSignalAugmentSox(torch.nn.Module):
     """
     Randomly applies the same set of signal augmentations to two signals. 
     Samples whether to apply filtering, pitch shifting, or tempo change 
     augmentations to signals, and the parameters for each augmentation. 
     """
-    def __init__(self, sampling_rate=20000, out_dur=40000):
+    def __init__(self, sample_rate=20000):
         super().__init__()
-        self.sampling_rate = sampling_rate
-        self.sampling_rate_tensor = torch.tensor(sampling_rate)
-        self.out_dur = out_dur
+        self.sample_rate = sample_rate
     
-    def apply_butterworth_filter(self,
-                                x,
-                                order,
-                                cutoff,
-                                btype='bandpass',
-                                ):
-        """
-        """
-        if isinstance(x, torch.Tensor):
-            x = x.numpy()
-        dtype = x.dtype
-        b, a = scipy.signal.butter(
-            order,
-            cutoff,
-            btype=btype,
-            analog=False,
-            output='ba',
-            fs=self.sampling_rate)
-        x = scipy.signal.lfilter(b, a, x)
-
-        return x.astype(dtype)
-    
-    def apply_sox_augments(self, x, sox_effects):
-        if isinstance(x, np.ndarray):
-            x = torch.from_numpy(x).float()
-        if x.ndim == 1:
-            x = x.unsqueeze(0)
-        x, output_rate = apply_effects_tensor(x.float(), self.sampling_rate_tensor, sox_effects, channels_first=True)
-        assert output_rate == self.sampling_rate, "Sox effects changed sample rate to {output_rate} from {self.sampling_rate}"
-        x = x.squeeze()
-        if len(x) < self.out_dur:
-            pad_dur = (self.out_dur - len(x)) // 2 + 1 
-            x = torch.nn.functional.pad(x, (pad_dur, pad_dur), mode='constant', value=0)
-        return x
 
     def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
         ### Get shared augmentations:
-        filter_kwargs, sox_effects = sample_augments(speech=speech)
+        aug_dict = sample_augments(speech=speech)
         if print_augments:
-            print(filter_kwargs)
-            print(sox_effects)
-        # apply to signal 1 
-        if len(filter_kwargs) > 0:
-            signal_1 = self.apply_butterworth_filter(signal_1, **filter_kwargs)
-        signal_1 = self.apply_sox_augments(signal_1, sox_effects)
+            print(aug_dict)
+        signal_1 = augment_excerpt(signal_1, aug_dict, sr=self.sample_rate)
+        signal_2 = augment_excerpt(signal_2, aug_dict, sr=self.sample_rate)
 
-        # apply to signal 2 
-        if len(filter_kwargs) > 0:
-            signal_2 = self.apply_butterworth_filter(signal_2, **filter_kwargs)
-        signal_2 = self.apply_sox_augments(signal_2, sox_effects)
         return signal_1, signal_2
+
+
+# class MatchedRandomSignalAugment(torch.nn.Module):
+#     """
+#     Randomly applies the same set of signal augmentations to two signals. 
+#     Samples whether to apply filtering, pitch shifting, or tempo change 
+#     augmentations to signals, and the parameters for each augmentation. 
+#     """
+#     def __init__(self, sampling_rate=20000, out_dur=40000):
+#         super().__init__()
+#         self.sampling_rate = sampling_rate
+#         self.out_dur = out_dur
+    
+#     def apply_butterworth_filter(self,
+#                                 x,
+#                                 order,
+#                                 cutoff,
+#                                 btype='bandpass',
+#                                 ):
+#         """
+#         """
+#         if isinstance(x, torch.Tensor):
+#             x = x.numpy()
+#         dtype = x.dtype
+#         b, a = scipy.signal.butter(
+#             order,
+#             cutoff,
+#             btype=btype,
+#             analog=False,
+#             output='ba',
+#             fs=self.sampling_rate)
+#         x = scipy.signal.lfilter(b, a, x)
+
+#         return x.astype(dtype)
+    
+#     def apply_sox_augments(self, x, sox_effects):
+#         if isinstance(x, np.ndarray):
+#             x = torch.from_numpy(x).float()
+#         if x.ndim == 1:
+#             x = x.unsqueeze(0)
+#         x, output_rate = apply_effects_tensor(x.float(), self.sampling_rate, sox_effects, channels_first=True)
+#         if output_rate != self.sampling_rate:
+#             x = torchaudio.functional.resample(x, output_rate, self.sampling_rate)
+#         # assert output_rate == self.sampling_rate, "Sox effects changed sample rate to {output_rate} from {self.sampling_rate}"
+#         x = x.squeeze()
+#         if len(x) < self.out_dur:
+#             pad_dur = (self.out_dur - len(x)) // 2 + 1 
+#             x = torch.nn.functional.pad(x, (pad_dur, pad_dur), mode='constant', value=0)
+#         return x
+
+#     def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
+#         ### Get shared augmentations:
+#         filter_kwargs, sox_effects = sample_augments(speech=speech)
+#         if print_augments:
+#             print(filter_kwargs)
+#             print(sox_effects)
+#         # apply to signal 1 
+#         if len(filter_kwargs) > 0:
+#             signal_1 = self.apply_butterworth_filter(signal_1, **filter_kwargs)
+#         signal_1 = self.apply_sox_augments(signal_1, sox_effects)
+
+#         # apply to signal 2 
+#         if len(filter_kwargs) > 0:
+#             signal_2 = self.apply_butterworth_filter(signal_2, **filter_kwargs)
+#         signal_2 = self.apply_sox_augments(signal_2, sox_effects)
+#         return signal_1, signal_2
+
+###################################
+# Sox transforms for augmentations 
+###################################
 
 
 def loguniform(low, high, size=None):
@@ -835,6 +864,110 @@ def loguniform(low, high, size=None):
     Helper function to draw samples uniformly on a log scale.
     """
     return np.exp(np.random.uniform(low=np.log(low), high=np.log(high), size=size))
+
+
+def pad_or_trim_to_len(x, n, mode='both', kwargs_pad={}):
+    """
+    Increases or decreases the length of a one-dimensional signal
+    by either padding or triming the array. If the difference
+    between `len(x)` and `n` is odd, this function will default to
+    adding/removing the extra sample at the end of the signal.
+    
+    Args
+    ----
+    x (np.ndarray): one-dimensional input signal
+    n (int): length of output signal
+    mode (str): specify which end of signal to modify
+        (default behavior is to symmetrically modify both ends)
+    kwargs_pad (dict): keyword arguments for np.pad function
+    
+    Returns
+    -------
+    x_out (np.ndarray): one-dimensional signal with length `n`
+    """
+    assert len(np.array(x).shape) == 1, "input must be 1D array"
+    assert mode.lower() in ['both', 'start', 'end']
+    n_diff = np.abs(len(x) - n)
+    if len(x) > n:
+        if mode.lower() == 'end':
+            x_out = x[:n]
+        elif mode.lower() == 'start':
+            x_out = x[-n:]
+        else:
+            x_out = x[int(np.floor(n_diff / 2)):-int(np.ceil(n_diff / 2))]
+    elif len(x) < n:
+        if mode.lower() == 'end':
+            pad_width = [0, n_diff]
+        elif mode.lower() == 'start':
+            pad_width = [n_diff, 0]
+        else:
+            pad_width = [int(np.floor(n_diff / 2)), int(np.ceil(n_diff / 2))]
+        kwargs = {'mode': 'constant'}
+        kwargs.update(kwargs_pad)
+        x_out = np.pad(x, pad_width, **kwargs)
+    else:
+        x_out = x
+    assert len(x_out) == n
+    return x_out
+
+def apply_butterworth_filter(y,
+                             sr,
+                             order,
+                             cutoff,
+                             btype='bandpass',
+                             mode='lfilter'):
+    """
+    """
+    dtype = y.dtype
+    b, a = scipy.signal.butter(
+        order,
+        cutoff,
+        btype=btype,
+        analog=False,
+        output='ba',
+        fs=sr)
+    if mode.lower() == 'filtfilt':
+        y_out = scipy.signal.filtfilt(b, a, y)
+    elif mode.lower() == 'lfilter':
+        y_out = scipy.signal.lfilter(b, a, y)
+    else:
+        raise ValueError("filter mode `{}` not recognized".format(mode))
+    return y_out.astype(dtype)
+
+
+def apply_sox_transformations(y, sr, kwargs_pitch={}, kwargs_tempo={}):
+    """
+    """
+    dtype = y.dtype
+    tfm = sox.Transformer()
+    if kwargs_pitch:
+        tfm.pitch(**kwargs_pitch)
+    if kwargs_tempo:
+        tfm.tempo(**kwargs_tempo)
+    y_out = tfm.build_array(input_filepath=None, input_array=y, sample_rate_in=sr)
+    y_out = pad_or_trim_to_len(y_out, len(y))
+    return y_out.astype(dtype)
+
+
+def augment_excerpt(y, aug_dict, sr=44100):
+    """
+    """
+    kwargs_sox = aug_dict.get('kwargs_sox', {})
+    if kwargs_sox:
+        y_out = apply_sox_transformations(y, sr, **kwargs_sox)
+        if np.isfinite(np.sqrt(np.mean(np.square(y_out)))):
+            y = y_out
+        else:
+            print("[augment_excerpt] `apply_sox_transformations` produced Inf/NaN (skipped)")
+    kwargs_butterworth = aug_dict.get('kwargs_butterworth', {})
+    if kwargs_butterworth:
+        y_out = apply_butterworth_filter(y, sr, **kwargs_butterworth)
+        if np.isfinite(np.sqrt(np.mean(np.square(y_out)))):
+            y = y_out
+        else:
+            print("[augment_excerpt] `apply_butterworth_filter` produced Inf/NaN (skipped)")
+    return y
+
 
 def sample_augments(speech=True,
                     sample_rate=20_000,
@@ -846,7 +979,7 @@ def sample_augments(speech=True,
     n_effects = np.random.randint(low=0, high=len(effect_types)+1)
     effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
     # sample if using filtering
-    dict_kwargs_butterworth = {} 
+    aug_dict = {}
     if 'filter' in effect_choice:
         nyquist = (sample_rate // 2) - 1 # limit must be exactly under and not equal to for filtering 
         if speech:
@@ -873,24 +1006,94 @@ def sample_augments(speech=True,
             bandpass_freq_high = nyquist 
 
         # stack as kwargs dict 
-        dict_kwargs_butterworth = {'order': bandpass_order_int,
+        aug_dict["kwargs_butterworth"] = {'order': bandpass_order_int,
                             'cutoff': [bandpass_freq_low, bandpass_freq_high],
                             'btype': 'bandpass'
                             }
 
     # Sample sox augmentations
-    effects_to_apply = []
-    if n_effects > 0:
-        for effect in effect_choice:
-            if effect == 'pitch':
-                pitch_n_semitones = np.random.uniform(-0.5, 0.5)
-                # pitch args are n semitones
-                effects_to_apply.append(['pitch', f"{pitch_n_semitones}"])
-                # chain resample for identical output from sox 
-                effects_to_apply.append(['rate', f"{sample_rate}"])
-            elif effect == 'tempo':
-                tempo_factor = np.random.uniform(0.90, 1.10)
-                # tempo args are factor
-                effects_to_apply.append(['tempo', f"{tempo_factor}"])
+    dict_kwargs_sox = {}
+    for effect in effect_choice:
+        if effect == 'pitch':
+            pitch_n_semitones = np.random.uniform(-0.5, 0.5)
+            # pitch args are n semitones
+            dict_kwargs_sox['kwargs_pitch'] = {
+                'n_semitones': pitch_n_semitones,
+                'quick': False,
+            }
+        elif effect == 'tempo':
+            tempo_factor = np.random.uniform(0.80, 1.20)
+            # tempo args are factor
+            dict_kwargs_sox['kwargs_tempo'] = {
+                            'factor': tempo_factor,
+                            'audio_type': 's',
+                            'quick': False,
+            }
+            
+    aug_dict['kwargs_sox'] = dict_kwargs_sox
 
-    return dict_kwargs_butterworth, effects_to_apply
+    return aug_dict
+
+
+
+
+
+
+# def sample_augments(speech=True,
+#                     sample_rate=20_000,
+#                     effect_types = ['filter', 'pitch',  'tempo'],
+#                     ):
+#     """
+#     """
+#     # Sample bandpass filter parameters
+#     n_effects = np.random.randint(low=0, high=len(effect_types)+1)
+#     effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
+#     # sample if using filtering
+#     dict_kwargs_butterworth = {} 
+#     if 'filter' in effect_choice:
+#         nyquist = (sample_rate // 2) - 1 # limit must be exactly under and not equal to for filtering 
+#         if speech:
+#             ## Use frequency ranges that overlap speech signals 
+#             range_bandpass_freq_low = [4e1, 4e2]
+#             range_bandpass_freq_high = [4e3, 10e3]
+#             bandpass_freq_low = loguniform(*range_bandpass_freq_low)
+#             bandpass_freq_high = loguniform(*range_bandpass_freq_high)
+#         else:
+#             ## Can use wider frequency range for non-speech signals
+#             range_bandpass_center_frequency = [16e1, 10e3]
+#             range_bandpass_bandwidth_octave = [2, 4]
+#             bandpass_center_frequency = loguniform(*range_bandpass_center_frequency)
+#             bandpass_bandwidth_octave = loguniform(*range_bandpass_bandwidth_octave)
+#             bandpass_freq_low = np.power(2, -bandpass_bandwidth_octave/2) * bandpass_center_frequency
+#             bandpass_freq_high = np.power(2, bandpass_bandwidth_octave/2) * bandpass_center_frequency
+#         # sample order for nth order butterworth filter 
+#         list_bandpass_order = [1, 2, 3, 4]
+#         bandpass_order_int = np.random.choice(list_bandpass_order)
+#         # clip hz based on nyquist 
+#         if bandpass_freq_low < 20:
+#             bandpass_freq_low = 20 
+#         if bandpass_freq_high > nyquist:
+#             bandpass_freq_high = nyquist 
+
+#         # stack as kwargs dict 
+#         dict_kwargs_butterworth = {'order': bandpass_order_int,
+#                             'cutoff': [bandpass_freq_low, bandpass_freq_high],
+#                             'btype': 'bandpass'
+#                             }
+
+#     # Sample sox augmentations
+#     effects_to_apply = []
+#     if n_effects > 0:
+#         for effect in effect_choice:
+#             if effect == 'pitch':
+#                 pitch_n_semitones = np.random.uniform(-0.5, 0.5)
+#                 # pitch args are n semitones
+#                 effects_to_apply.append(['pitch', f"{pitch_n_semitones}"])
+#                 # chain resample for identical output from sox 
+#                 # effects_to_apply.append(['rate', f"{sample_rate}"])
+#             elif effect == 'tempo':
+#                 tempo_factor = np.random.uniform(0.90, 1.10)
+#                 # tempo args are factor
+#                 effects_to_apply.append(['tempo', f"{tempo_factor}"])
+
+#     return dict_kwargs_butterworth, effects_to_apply

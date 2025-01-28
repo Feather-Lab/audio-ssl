@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 from robustness.audio_functions import audio_transforms
 import pandas as pd
+import logging
 
 # import psutil  # uncomment for tracking process in debug notebook
 
@@ -362,7 +363,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
         if signal_augment:
-            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugment(sampling_rate=20000)
+            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(sample_rate=20000)
 
     def class_map(self):
         """
@@ -444,10 +445,13 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                         target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
                         target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
             
-            # Apply augments first in case signals sped up or slowed down - rand crop can handle centering / tempo wont alter centering
+            # Apply pitch, tempo, and filtering augments 
             if self.signal_augment:
                 cropped_11, cropped_21 = self.matched_signal_augment(speech_1, speech_2)
                 cropped_12, cropped_22 = self.matched_signal_augment(speech_1, speech_2)
+                # hack to kill sox warnings 
+                if idx == 0:
+                    logging.getLogger('sox').setLevel(logging.ERROR)
 
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)

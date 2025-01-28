@@ -19,7 +19,7 @@ mamba activate cochdnn_ssl_pl
 
 export PYTHONPATH=$PYTHONPATH:~/ceph/projects/cochdnn
 export PYTHONFAULTHANDLER=1
-export NCCL_DEBUG=INFO
+# export NCCL_DEBUG=INFO
 export CUDA_LAUNCH_BLOCKING=1
 # export NCCL_DEBUG_SUBSYS=ALL
 
