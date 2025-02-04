@@ -164,7 +164,8 @@ def cli_main(args):
     callbacks.append(lr_monitor)
     
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               version=config_path.stem,
+                               name=config_path.stem,
+                               group='supervised_models' if classifier else "SSL_models",
                                project='cochdnn')
     # log gradients 
     wandb_logger.watch(model.model, log="all",)
@@ -183,7 +184,8 @@ def cli_main(args):
         accelerator="gpu", 
         strategy='ddp',
         # strategy=DDPStrategy(process_group_backend="gloo"),
-        gradient_clip_val=grad_clip, # clipt grad l2 norm to 1 
+        gradient_clip_val=grad_clip, 
+        gradient_clip_algorithm=config['hparas'].get('gradient_clip_algorithm', "norm"),
         # limit_train_batches=2,
         # limit_val_batches=2,
         # val_check_interval=config['hparas']['valid_step'], # just validate every epoch 

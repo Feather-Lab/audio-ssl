@@ -72,6 +72,7 @@ class LitAudioSSL(L.LightningModule):
 
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
+        self.skip_pairing = self.config['hparas'].get('skip_pairing', False)
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
         if self.opt_supervised_task:
             self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
@@ -97,8 +98,9 @@ class LitAudioSSL(L.LightningModule):
         # pass pairs through model 
         _, out_11, logits_11 = self.model(spec_11)
         _, out_12, logits_12 = self.model(spec_12)
-        _, out_21, logits_21 = self.model(spec_21)
-        _, out_22, logits_22 = self.model(spec_22)
+        if not self.skip_pairing:
+            _, out_21, logits_21 = self.model(spec_21)
+            _, out_22, logits_22 = self.model(spec_22)
         ## concat reps based on task 
         if self.ssl_task == 'dual':
             # concat is handled in the paired loss function 
@@ -111,16 +113,24 @@ class LitAudioSSL(L.LightningModule):
             if self.ssl_task == 'word':
                 # group word pairs as augmentations
                 # cat 11 and 21 as batch view 1 along dim 0 
-                z_1 =  torch.cat([out_11, out_21], dim=0)
-                # cat 12 and 22 as batch view 2 along dim 0 
-                z_2 =  torch.cat([out_12, out_22], dim=0)
+                if self.skip_pairing:
+                    z_1 = out_11
+                    z_2 = out_12
+                else:
+                    z_1 =  torch.cat([out_11, out_21], dim=0)
+                    # cat 12 and 22 as batch view 2 along dim 0 
+                    z_2 =  torch.cat([out_12, out_22], dim=0)
 
             elif self.ssl_task == 'audioset':
                 # group audioset pairs as augmentations
-                # cat 11 and 21 as batch view 1 along dim 0 
-                z_1 =  torch.cat([out_11, out_12], dim=0)
-                # cat 21 and 22 as batch view 2 along dim 0 
-                z_2 =  torch.cat([out_21, out_22], dim=0)
+                if self.skip_pairing:
+                    z_1 = out_11
+                    z_2 = out_21
+                else:
+                    # cat 11 and 21 as batch view 1 along dim 0 
+                    z_1 =  torch.cat([out_11, out_12], dim=0)
+                    # cat 21 and 22 as batch view 2 along dim 0 
+                    z_2 =  torch.cat([out_21, out_22], dim=0)
             # z_1 and z_2 are the different views
             loss_ssl = self.ssl_loss(z_1, z_2) 
 
@@ -131,25 +141,36 @@ class LitAudioSSL(L.LightningModule):
         # get classification loss
             class_loss_11, task_loss_11 = self.multi_task_loss(logits_11, labels_11, return_indiv_loss=True)
             class_loss_12, task_loss_12 = self.multi_task_loss(logits_12, labels_12, return_indiv_loss=True)
-            class_loss_21, task_loss_21  = self.multi_task_loss(logits_21, labels_21, return_indiv_loss=True)
-            class_loss_22, task_loss_22 = self.multi_task_loss(logits_22, labels_22, return_indiv_loss=True)
+            if not self.skip_pairing:
+                class_loss_21, task_loss_21  = self.multi_task_loss(logits_21, labels_21, return_indiv_loss=True)
+                class_loss_22, task_loss_22 = self.multi_task_loss(logits_22, labels_22, return_indiv_loss=True)
+                total_class_loss = (class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22) / 4.0 
+            else: 
+                total_class_loss = (class_loss_11 + class_loss_12) / 2.0 
 
-            total_class_loss = (class_loss_11 + class_loss_12 + class_loss_21 + class_loss_22) / 4.0 
             self.log(f"{step_type}_total_class_loss", total_class_loss.detach(), prog_bar=True, sync_dist=True)
 
             for task, metric in self.metrics.items():
-                # Add acc per task 
-                task_loss = task_loss_11[task] + task_loss_12[task] + task_loss_21[task] + task_loss_22[task]
-                task_loss = task_loss / 4.0
 
-                self.log(f"{step_type}_{task}_loss", task_loss.detach(), prog_bar=True, sync_dist=True)
+                task_loss = task_loss_11[task] + task_loss_12[task]
+                if not self.skip_pairing:
+                    # Add acc per task 
+                    task_loss += task_loss_21[task] + task_loss_22[task]
+                    task_loss = task_loss / 4.0
+
+                else:
+                    task_loss = task_loss / 2.0
+                    self.log(f"{step_type}_{task}_loss", task_loss.detach(), prog_bar=True, sync_dist=True)
 
                 acc = 0
                 acc += metric(logits_11[task], labels_11[task]).item()
                 acc += metric(logits_12[task], labels_12[task]).item()
-                acc += metric(logits_21[task], labels_21[task]).item()
-                acc += metric(logits_22[task], labels_22[task]).item()
-                acc /= 4.0  
+                if not self.skip_pairing:
+                    acc += metric(logits_21[task], labels_21[task]).item()
+                    acc += metric(logits_22[task], labels_22[task]).item()
+                    acc /= 4.0  
+                else:
+                    acc /= 2.0
 
                 if 'signal' in task:
                     self.log(f"{step_type}_{task}_acc", acc,  prog_bar=False, sync_dist=True)
@@ -335,6 +356,8 @@ class LitAudioSSL(L.LightningModule):
     # @property
     def total_training_steps(self) -> int:
         dataset_size = len(self.train_dataloader())
+        if self.skip_pairing:
+            dataset_size // 2 # not including pairing 
         num_devices = self.config['num_gpus']
         effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
         max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
@@ -350,7 +373,7 @@ class LitAudioSSL(L.LightningModule):
     def mmcr_lower_bound(self) -> int:
         # precompute mmcr lower bound as prop 3.3 from https://arxiv.org/pdf/2406.09366
         p = torch.tensor(self.config['hparas']['global_batch_size'])
-        if self.ssl_task == 'word' or self.ssl_task == 'audioset':
+        if (self.ssl_task == 'word' or self.ssl_task == 'audioset') and not self.skip_pairing:
             p *= 2 # account for stacking "paired" examples along batch dimension
         d = torch.tensor(self.config['model']['arch_kwargs']['projector_dims'][-1])
         return torch.sqrt(p * torch.min(p, d))

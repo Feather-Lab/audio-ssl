@@ -445,17 +445,18 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
                         target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
                         target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
             
-            # Apply pitch, tempo, and filtering augments 
-            if self.signal_augment:
-                cropped_11, cropped_21 = self.matched_signal_augment(speech_1, speech_2)
-                cropped_12, cropped_22 = self.matched_signal_augment(speech_1, speech_2)
-                # hack to kill sox warnings 
-                if idx == 0:
-                    logging.getLogger('sox').setLevel(logging.ERROR)
 
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(speech_1, speech_2)
             cropped_12, cropped_22 = self.matched_random_crop(speech_1, speech_2)
+
+            # Apply pitch, tempo, and filtering augments 
+            if self.signal_augment:
+                cropped_11, cropped_21 = self.matched_signal_augment(cropped_11, cropped_21)
+                cropped_12, cropped_22 = self.matched_signal_augment(cropped_12, cropped_22)
+                # hack to kill sox warnings 
+                if idx == 0:
+                    logging.getLogger('sox').setLevel(logging.ERROR)
 
             cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
             cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)

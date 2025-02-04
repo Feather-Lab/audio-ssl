@@ -365,9 +365,9 @@ def cli_main(args):
     
     # train classifier if we haven't already, or if overwriting 
     if not args.eval_only:
-        if not classifier_ckpt or args.overwrite_classifier:
+        # if not classifier_ckpt or args.overwrite_classifier:
             # fit classifier 
-            trainer.fit(module)
+        trainer.fit(module)
 
     # run test 
     test_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=word_ssl
-#SBATCH --output=outLogs/barlow_word_resnet50_MatchedSpeechInNoiseDatasetBatched_%j.out
-#SBATCH --error=outLogs/barlow_word_resnet50_MatchedSpeechInNoiseDatasetBatched_%j.err
+#SBATCH --output=outLogs/barlow_word_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.out
+#SBATCH --error=outLogs/barlow_word_resnet18_MatchedSpeechInNoiseDatasetBatched_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=16
