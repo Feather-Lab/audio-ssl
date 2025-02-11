@@ -160,7 +160,7 @@ class LitAudioSSL(L.LightningModule):
 
                 else:
                     task_loss = task_loss / 2.0
-                    self.log(f"{step_type}_{task}_loss", task_loss.detach(), prog_bar=True, sync_dist=True)
+                self.log(f"{step_type}_{task}_loss", task_loss.detach(), prog_bar=True, sync_dist=True)
 
                 acc = 0
                 acc += metric(logits_11[task], labels_11[task]).item()

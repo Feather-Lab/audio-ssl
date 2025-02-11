@@ -11,12 +11,13 @@ from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
 import robustness.audio_functions.audio_transforms as at 
 
-from audio_ssl.misc import LARS
+from audio_ssl.misc import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 import pathlib
 from argparse import ArgumentParser, BooleanOptionalAction
+from typing import List, Union, Tuple
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -26,6 +27,7 @@ torch.backends.cudnn.allow_tf32 = True
 class SSLClassifier(L.LightningModule):
     def __init__(self, config, ckpt_path, layer_out):
         super().__init__()
+        self.save_hyperparameters()
         self.config = config
         self.layer_out = layer_out
         # init the pretrained LightningModule
@@ -162,9 +164,26 @@ class SSLClassifier(L.LightningModule):
                             lars_adaptation_filter=True,
                         ) 
         else:
+            lr = self.config['hparas']['lr']
             opt = getattr(torch.optim, self.config['hparas']['optimizer'])
-            self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr'])     
-        # self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1) 
+            self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr']) 
+                
+        if self.config['hparas'].get('lr_schedule', False):
+            total_training_steps = self.total_training_steps()
+            num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
+            lr_scheduler = CosineWarmupScheduler(
+                optimizer=self.optimizer,
+                batch_size=self.config['hparas']['global_batch_size'], # is global batch size
+                warmup_steps=num_warmup_steps,
+                max_steps=total_training_steps,
+                lr=lr
+            )
+            return [self.optimizer], [
+                    {
+                        'scheduler': lr_scheduler,  # The LR scheduler instance (required)
+                        'interval': 'step',  # The unit of the scheduler's step size
+                    }
+                ] 
         return [self.optimizer] # , [self.schedule]
     
     def collate_fn(self, batch):
@@ -222,7 +241,7 @@ class SSLClassifier(L.LightningModule):
                                                  train=True,
                                                  transform=None, # perform transforms in collate_fn
                                                  batch_size=self.config['hparas']['batch_size'])
-        self.train_dataloader = torch.utils.data.DataLoader(
+        train_dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
             num_workers=self.config['num_workers'], 
@@ -231,7 +250,7 @@ class SSLClassifier(L.LightningModule):
             shuffle=False,
             collate_fn=self.collate_fn
         )
-        return self.train_dataloader
+        return train_dataloader
     
     def val_dataloader(self):
         dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
@@ -248,7 +267,19 @@ class SSLClassifier(L.LightningModule):
         )
         return dataloader
 
+    def total_training_steps(self) -> int:
+        dataset_size = len(self.train_dataloader())
+        num_devices = self.config['num_gpus']
+        effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
+        max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
 
+        if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps and self.trainer.max_steps != -1:
+            return int(self.trainer.max_steps)
+        return int(max_estimated_steps)
+
+    def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
+        return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
+    
 def cli_main(args):
     L.seed_everything(args.random_seed)
 
@@ -265,25 +296,38 @@ def cli_main(args):
     # update config for transfer learning task
     # config['data'] = {}
     config['num_workers'] = args.num_workers
+    config['num_gpus'] = args.gpus
     config['hparas']['batch_size'] = args.batch_size
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
     # used 2 gpus for training, mult by 2 for now to get same checkpoint 
     config['hparas']['lr'] = args.lr 
-    config['hparas']['epochs'] = 3
+    config['hparas']['epochs'] = 1
     config['with_noise'] = args.with_noise
     # don't load in classifier head if it exists 
     config['model']['arch_kwargs']['supervised'] =  False
-    config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794,    
-                                "signal/speaker_int": 433} 
+
+    scheduler_str = ""
+    if args.lr_scheduler:
+        config['hparas']['lr_schedule'] = True
+        config['hparas']['num_warmup_steps_or_ratio'] = 0
+        scheduler_str = "_cosine_lr_scheduler_"
+
+    if args.task == 'both':
+        config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794,    
+                                    "signal/speaker_int": 433} 
+        task_str = f"word_and_speaker_task"
+        
+    elif args.task == 'word':
+        config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794} 
+        task_str = f"word_task"
+
+    elif args.task == 'speaker':
+        config['model']['arch_kwargs']['num_classes'] = {"signal/speaker_int": 433} 
+        task_str = f"speaker_task"
+
+    print(f"Running {task_str} transfer")
     
-    # if args.task == "word":
-    #     config['data']['task_label'] = 'signal/word_int'
-
-    # elif args.task == "speaker":
-    #     config['data']['task_label'] = 'signal/speaker_int'
-    #     config['model']['arch_kwargs']['n_classes'] =  433
-
     config['hparas']['task_loss_params'] = {key:value for key,value in config['hparas']['task_loss_params'].items() if key in config['model']['arch_kwargs']['num_classes'].keys()}
 
     if args.w_mlp:
@@ -306,7 +350,7 @@ def cli_main(args):
         ckpt_modifier = '_from_best_val_ckpt'
     
     w_noise_modifier = '_with_noise' if args.with_noise else ""
-    str_modifier = f"word_and_speaker_{config['hparas']['optimizer']}_{config['hparas']['lr']}{mlp_str}{ckpt_modifier}{w_noise_modifier}"
+    str_modifier = f"{task_str}_{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     module = SSLClassifier(config=config,
@@ -393,23 +437,41 @@ def cli_main(args):
     top5_speaker = []
 
     for record in outputs:
-        top1_word.append(record['top1']['signal/word_int'])
-        top1_speaker.append(record['top1']['signal/speaker_int'])
-        top5_word.append(record['top5']['signal/word_int'])
-        top5_speaker.append(record['top5']['signal/speaker_int'])
+        if args.task == 'both' or args.task == 'word':
+            top1_word.append(record['top1']['signal/word_int'])
+            top5_word.append(record['top5']['signal/word_int'])
+        if args.task == 'both' or args.task == 'speaker':
+            top1_speaker.append(record['top1']['signal/speaker_int'])
+            top5_speaker.append(record['top5']['signal/speaker_int'])
     n_examples = len(outputs)
     
-    output_dict = {
-        "word_top1_mean": torch.stack(top1_word).mean(),
-        "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
-        "speaker_top1_mean": torch.stack(top1_speaker).mean(),
-        "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
+    if args.task == 'both':
+        output_dict = {
+            "word_top1_mean": torch.stack(top1_word).mean(),
+            "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
+            "speaker_top1_mean": torch.stack(top1_speaker).mean(),
+            "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
 
-        "word_top5_mean": torch.stack(top5_word).mean(),
-        "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
-        "speaker_top5_mean": torch.stack(top5_speaker).mean(),
-        "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
-    }
+            "word_top5_mean": torch.stack(top5_word).mean(),
+            "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
+            "speaker_top5_mean": torch.stack(top5_speaker).mean(),
+            "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
+        }
+    elif args.task == 'word':
+        output_dict = {
+            "word_top1_mean": torch.stack(top1_word).mean(),
+            "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
+            "word_top5_mean": torch.stack(top5_word).mean(),
+            "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
+        }
+    elif args.task == 'speaker':
+        output_dict = {
+            "speaker_top1_mean": torch.stack(top1_speaker).mean(),
+            "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
+            "speaker_top5_mean": torch.stack(top5_speaker).mean(),
+            "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
+        }
+        
     output_dict = {key:val.item() for key,val in output_dict.items()}  
 
     print(output_dict)
@@ -469,7 +531,7 @@ if __name__ == "__main__":
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
     parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
-    parser.add_argument('--task', default='word', type=str, help='One of: ["word", "speaker"]. Default is "word"')
+    parser.add_argument('--task', default='both', type=str, help='One of: ["both", "word", "speaker"]. Default is "both"')
     parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
@@ -477,7 +539,7 @@ if __name__ == "__main__":
     parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
     parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
-
+    parser.add_argument('--lr_scheduler', action=BooleanOptionalAction, help='Use lr scheduler?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     args = parser.parse_args()
 
