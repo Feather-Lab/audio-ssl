@@ -77,23 +77,35 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --model_ckpt_dir model_checkpoints \
 #                                    --batch_size 192 \
-#                                    --layer_str 'relufc' \
-#                                    --optimizer "AdamW" --lr 0.001 \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "AdamW" --lr 0.01 \
 #                                    --task 'word' \
-#                                    --ckpt_path model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=160-step=28980-best_word_task.ckpt \
+#                                    --with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+                                   
+                                 #   --ckpt_path model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=160-step=28980-best_word_task.ckpt \
+                                #    --overwrite
+
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/mmcr_word_kell2018_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relu4' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'word' \
+#                                    --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt
+
+#                                    --ckpt_path model_checkpoints/mmcr_word_kell2018_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=110-step=19980-best_val.ckpt \
 #                                    --with_noise --no-eval_only --lr_scheduler
 #                                 #    --overwrite
 
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/mmcr_word_kell2018_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+
+
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path byol-a/config.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --layer_str 'relufc' \
+                                   --layer_str 'avgpool' \
                                    --optimizer "AdamW" --lr 0.001 \
                                    --task 'word' \
-                                   --ckpt_path model_checkpoints/mmcr_word_kell2018_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=110-step=19980-best_val.ckpt \
-                                   --with_noise --no-eval_only --lr_scheduler
-                                #    --overwrite
-
-
-
+                                   --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+                                   
