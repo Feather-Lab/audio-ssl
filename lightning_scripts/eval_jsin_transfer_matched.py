@@ -91,10 +91,32 @@ class SSLClassifier(L.LightningModule):
                                     'relufc': 4096}
             
         elif config['model']['arch_kwargs']['backbone'] == 'resnet18':
-                layer_size_dict = {'avgpool': 512,
-                                'final': 512}
+                if self.time_avg_rep:
+                    layer_size_dict = {'input_after_preproc': 211,
+                                        'conv1': 6784,
+                                        'bn1': 6784,
+                                        'conv1_relu1': 6784,
+                                        'maxpool1': 3392,
+                                        'layer1': 3392,
+                                        'layer2': 3456,
+                                        'layer3': 3584,
+                                        'layer4': 3584,
+                                        'avgpool': 512,
+                                        'final': 512}
+                else:
+                    layer_size_dict = {'input_after_preproc': 82290,
+                                        'conv1': 1322880,
+                                        'bn1': 1322880,
+                                        'conv1_relu1': 1322880,
+                                        'maxpool1': 332416,
+                                        'layer1': 332416,
+                                        'layer2': 169344,
+                                        'layer3': 89600,
+                                        'layer4': 46592,
+                                        'avgpool': 512,
+                                        'final': 512}
         else:
-
+            # TODO - get shapes for resnet50 
             layer_size_dict = {'input_after_preproc': 211,
                                 'conv1': 6784,
                                 'bn1': 6784,
@@ -106,7 +128,6 @@ class SSLClassifier(L.LightningModule):
                                 'layer4': 14336,
                                 'avgpool': 2048,
                                 'final': 2048}
-        
         
         proj_out_dim = layer_size_dict[layer_out]
         # init trainable word classifier  
@@ -145,7 +166,7 @@ class SSLClassifier(L.LightningModule):
         
     def forward(self, x):
         with torch.no_grad():
-            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=True)
+            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
             activations = all_outputs[self.layer_out]
             if self.time_avg_rep:
                 activations = activations.mean(dim=-1).view(activations.shape[0], -1)
@@ -336,7 +357,7 @@ class BYOLAClassifier(L.LightningModule):
         config = EasyDict(config)
         self.config = config
 
-        # self.stats = [10158236.,  51190964.]
+        # self.stats = [10158236.,  51190964.] ## Stats of jsinV3 - can use if needeing to do inference
         self.stats = [-5.4919195,  5.0389895]
 
         self.to_melspec = torchaudio.transforms.MelSpectrogram(
@@ -370,6 +391,7 @@ class BYOLAClassifier(L.LightningModule):
 
         num_classes = config['model']['arch_kwargs']['num_classes']
         proj_out_dim = 2048
+
         self.mlp = None
         if config['model'].get('classifier', False):
             # Classifier is MLP defined by hparas

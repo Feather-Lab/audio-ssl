@@ -11,7 +11,6 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
-#SBATCH -x workergpu156
 
 ##SBATCH --constraint=h100  # if you want a particular type of GPU
 mamba activate cochdnn_ssl_pl
@@ -19,7 +18,7 @@ mamba activate cochdnn_ssl_pl
 
 export PYTHONPATH=$PYTHONPATH:~/ceph/projects/cochdnn
 export PYTHONFAULTHANDLER=1
-export NCCL_DEBUG=INFO
+# export NCCL_DEBUG=INFO
 export CUDA_LAUNCH_BLOCKING=1
 # export NCCL_DEBUG_SUBSYS=ALL
 
@@ -29,9 +28,28 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs visible on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet50_base_Matched_blocked_batches_lmbda_1e-1_lr_6e-1.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_proj_4096_3_layer_avg_pool.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
+                                   --resume_training 
+# 
+
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_5e-3_lr_2e-1_w_augment_per_frame.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_proj_1024_avg_pool.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_avg_pool.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+
+
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
 
 # srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/barlow_word_resnet18_base_Matched_blocked_batches_lmbda_1e-1_large_proj_w_schedule.yaml \
