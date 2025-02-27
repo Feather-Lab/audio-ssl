@@ -90,11 +90,6 @@ class LitAudioSSL(L.LightningModule):
         else:
             spec_11, spec_12, spec_21, spec_22  = batch
         ## Permute dims (1, batch, time) -> (batch, 1, time)
-        # spec_11 = spec_11.permute(1,0,2)
-        # spec_12 = spec_12.permute(1,0,2)
-        # spec_21 = spec_21.permute(1,0,2)
-        # spec_22 = spec_22.permute(1,0,2)
-
         # pass pairs through model 
         _, out_11, logits_11 = self.model(spec_11)
         _, out_12, logits_12 = self.model(spec_12)
@@ -276,7 +271,7 @@ class LitAudioSSL(L.LightningModule):
             self.init_train_log = False 
 
 
-    def forward(self, x):
+    def forward(self, x, with_latent=False):
         """
         PL required forward wrapper. Enables calling model in two ways:
         1) standard call in .py scripts
@@ -285,7 +280,7 @@ class LitAudioSSL(L.LightningModule):
         2) inside this lightning module's methods as self (eg in _step)
             outs = self(inputs) # self is self.forward, and is same as self.model.forward 
         """
-        return self.model(x)
+        return self.model(x, with_latent=with_latent)
 
     def collate_fn(self, batch):
         batch = batch[0]

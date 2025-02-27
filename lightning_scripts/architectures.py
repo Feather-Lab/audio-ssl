@@ -4,6 +4,7 @@ from torch import nn
 from torchvision.models.resnet import resnet50
 from robustness.audio_models import resnet50 as resnet50_robusntess
 import robustness.audio_models as robustness_architectures
+import einops 
 
 class ProjectionHead(nn.Module):
     def __init__(self, projector_dims):
@@ -31,6 +32,8 @@ class SSLBaseModel(nn.Module):
         self.f = robustness_architectures.__dict__[backbone]()
         self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
         self.f.fc = nn.Identity()
+        if "max_to_avg_pool" in kwargs:
+            self.f.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
 
         # projection head (Following exactly barlow twins offical repo)
         projector_dims = [proj_out_dim] + projector_dims
@@ -58,19 +61,29 @@ class SSLBaseModel(nn.Module):
 
 
 class SSLBaseModelSingleTask(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, **kwargs):
         super().__init__()
         self.supervised = supervised
         self.backbone = backbone
+        self.frame_wise_loss = frame_wise_loss
 
         self.f = robustness_architectures.__dict__[backbone]()
         
         if 'resnet' in backbone:
             self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
             self.f.fc = nn.Identity()
+            if "max_to_avg_pool" in kwargs:
+                self.f.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+            if self.frame_wise_loss:
+                # don't average over time dimensions - will fold into batch dimension 
+                self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
+                # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
+                self.ssl_rep_name = 'layer4'
+
         elif 'kell' in backbone:
             self.f.dropout = nn.Identity()
             self.f.classification = nn.Identity()
+        
 
         # projection head (Following exactly barlow twins offical repo)
         ## Assumes same dims for inv and equi tasks 
@@ -86,9 +99,18 @@ class SSLBaseModelSingleTask(nn.Module):
                 self.lin_cls = nn.Linear(proj_out_dim, num_classes)
 
     def forward(self, x):
-        x = self.f(x)
-        feature = torch.flatten(x, start_dim=1)
-        inv_out = self.g_inv(feature)
+        if self.frame_wise_loss:
+            _, feature, all_outputs = self.f(x, with_latent=True)
+            feature = torch.flatten(feature, start_dim=1)
+            ## Fold time into batch dimension - time is collated 
+            ssl_feature = all_outputs[self.ssl_rep_name]
+            ssl_feature = self.freq_avg(ssl_feature)
+            ssl_feature = einops.rearrange(ssl_feature, "b c f t -> (b t) (c f)")
+            inv_out = self.g_inv(ssl_feature)
+        else:
+            x = self.f(x)
+            feature = torch.flatten(x, start_dim=1)
+            inv_out = self.g_inv(feature)
         if not self.supervised:
             return feature, inv_out, None 
         else:
