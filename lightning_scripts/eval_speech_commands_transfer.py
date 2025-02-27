@@ -20,6 +20,13 @@ from torchaudio.functional import resample
 from argparse import ArgumentParser, BooleanOptionalAction
 from typing import List, Union, Tuple
 
+import torchaudio 
+sys.path.append('byol-a')
+from byol_a.common import *
+from byol_a.augmentations import PrecomputedNorm
+from byol_a.models import AudioNTT2020
+from easydict import EasyDict
+
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -112,7 +119,7 @@ class SSLClassifier(L.LightningModule):
         
     def forward(self, x):
         with torch.no_grad():
-            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=True)
+            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
             activations = all_outputs[self.layer_out]
             if self.layer_out in [ 'avgpool', 'final', 'relufc']:
                 activations = activations.view(activations.shape[0], -1)
@@ -263,6 +270,222 @@ class SSLClassifier(L.LightningModule):
     def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
         return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
     
+
+class BYOLAClassifier(L.LightningModule):
+    def __init__(self, config,):
+        super().__init__()
+        self.save_hyperparameters()
+        super().__init__()
+        config = EasyDict(config)
+        self.config = config
+
+        # self.stats = [10158236.,  51190964.] ## Stats of jsinV3 - can use if needeing to do inference
+        self.stats = [-5.4919195,  5.0389895]
+
+        self.to_melspec = torchaudio.transforms.MelSpectrogram(
+            sample_rate=config.sample_rate,
+            n_fft=config.n_fft,
+            win_length=config.win_length,
+            hop_length=config.hop_length,
+            n_mels=config.n_mels,
+            f_min=config.f_min,
+            f_max=config.f_max,
+        )
+        
+        self.normalizer = PrecomputedNorm(self.stats)
+
+        # Load pretrained weights.
+        self.feature_extractor = AudioNTT2020(d=self.config.feature_d)
+        self.feature_extractor.load_weight('byol-a/pretrained_weights/AudioNTT2020-BYOLA-64x96d2048.pth', self.device)
+        self.feature_extractor = self.feature_extractor.eval()
+        # Need to manually freeze params here 
+        self.feature_extractor.trainable = False
+        for name, param in self.feature_extractor.named_parameters():
+            param.requires_grad = False 
+
+        proj_out_dim = 2048
+
+        num_classes = 30 # 30 classes in speech commands dataset 
+
+        # init trainable word classifier  
+        self.speech_commands_dataset = load_dataset("google/speech_commands", 'v0.01', trust_remote_code=True)
+
+        self.crop_or_pad = CenterCropOrPad(40000)
+        self.set_dbSPL = at.DBSPLNormalizeForegroundAndBackground(60)
+
+        self.mlp = None
+
+        if config['model'].get('classifier', False):
+            # Classifier is MLP defined by hparas
+            # projection head (Following exactly barlow twins offical repo)
+            hidden_dims = [proj_out_dim] + config['model']['classifier']['hidden_dims']
+            layers = []
+            for i in range(len(hidden_dims)-1):
+                layers.append(
+                    nn.Linear(hidden_dims[i], hidden_dims[i + 1], bias=False)
+                )
+                layers.append(nn.BatchNorm1d(hidden_dims[i + 1]))
+                layers.append(nn.ReLU())
+            proj_out_dim = hidden_dims[-1] 
+            self.mlp = nn.Sequential(*layers)
+
+
+        self.classifier = nn.Linear(proj_out_dim, num_classes)
+
+        self.loss_fn = nn.CrossEntropyLoss() 
+
+        self.accuracy = Accuracy(task="multiclass", num_classes=num_classes) 
+        
+    def forward(self, x):
+        with torch.no_grad():
+            x = self.normalizer((self.to_melspec(x) + torch.finfo(torch.float).eps).log())
+            activations = self.feature_extractor(x)
+            activations = activations.detach()
+        if self.mlp:
+            activations = self.mlp(activations)
+        logits = self.classifier(activations)
+        return logits 
+
+    def _step(self, batch, batch_idx, step_type):
+        audio, labels = batch
+        logits = self.forward(audio) 
+        loss = self.loss_fn(logits,labels)
+
+        self.log(f"{step_type}_loss", loss.detach(), prog_bar=True, sync_dist = True)
+        # calc acc, add acc and task loss to log
+        acc = self.accuracy(logits, labels)
+        self.log(f"{step_type}_acc", acc, prog_bar=True, sync_dist = True)
+        return loss 
+    
+    def training_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "train")
+
+    def validation_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "val")
+    
+    def test_step(self, batch, batch_idx):
+        return self._step(batch, batch_idx, "test")
+
+    def predict_step(self, batch):
+        audio, labels = batch
+        logits = self.forward(audio) 
+        loss = self.loss_fn(logits,labels)
+        task_acc = self.accuracy(logits, labels)
+        task_top5 = torch.isin(torch.topk(logits.softmax(-1), k=5, dim=-1).indices, labels).any(-1).float().mean()
+        return {"top1":task_acc, "top5": task_top5}
+
+    def configure_optimizers(self):
+        # Optimizer
+        if self.config['hparas']['optimizer'] == "LARS":
+            lr = self.config['hparas']['lr'] * self.config['hparas']['batch_size'] / 256
+            self.optimizer = LARS(
+                            self.classifier.parameters(),
+                            lr=lr,
+                            weight_decay=1e-6,
+                            momentum=0.9,
+                            weight_decay_filter=True,
+                            lars_adaptation_filter=True,
+                        ) 
+        else:
+            lr = self.config['hparas']['lr']
+            opt = getattr(torch.optim, self.config['hparas']['optimizer'])
+            self.optimizer = opt(self.classifier.parameters(), lr=self.config['hparas']['lr']) 
+                
+        if self.config['hparas'].get('lr_schedule', False):
+            total_training_steps = self.total_training_steps()
+            num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
+            lr_scheduler = CosineWarmupScheduler(
+                optimizer=self.optimizer,
+                batch_size=self.config['hparas']['batch_size'], # is global batch size
+                warmup_steps=num_warmup_steps,
+                max_steps=total_training_steps,
+                lr=lr
+            )
+            return [self.optimizer], [
+                    {
+                        'scheduler': lr_scheduler,  # The LR scheduler instance (required)
+                        'interval': 'step',  # The unit of the scheduler's step size
+                    }
+                ] 
+        return [self.optimizer] # , [self.schedule]
+    
+    
+    def collate_fn(self, batch):
+        # batch = batch[0]
+        tformed_audio = []
+        word_labels = []
+        for eg in batch:
+            wav = torch.from_numpy(eg['audio']['array'])
+            # wav, _ = audio_transforms(eg['array'], None)
+            wav = resample(wav.float(), 16_000, 20_000)
+            # zero pad word to middle of frame 
+            wav = self.crop_or_pad(wav.squeeze())
+            wav, _ = self.set_dbSPL(wav, None)
+            if wav is None:
+                continue
+            tformed_audio.append(wav.unsqueeze(0))
+            word_labels.append(eg['label'])
+        audio = torch.stack(tformed_audio)
+        word_int_label = torch.tensor(word_labels)
+        return audio, word_int_label
+    
+    def train_dataloader(self):
+        # set train dataloader as attr so we can rotate examples every epoch 
+        train_split = self.speech_commands_dataset['train']
+        # remove silence 
+        train_split = train_split.filter(lambda example: (not ('_silence_' in example['file'])) and (not (example['audio']['array'] is None)))
+        train_dataloader = torch.utils.data.DataLoader(
+            train_split,
+            batch_size=self.config['hparas']['batch_size'],
+            num_workers=self.config['num_workers'], 
+            pin_memory=True,
+            # persistent_workers=True,
+            shuffle=True,
+            collate_fn=self.collate_fn
+        )
+        return train_dataloader
+    
+    def val_dataloader(self):
+        dataset = self.speech_commands_dataset['validation']
+        # remove silence 
+        dataset = dataset.filter(lambda example: (not ('_silence_' in example['file'])) and (not (example['audio']['array'] is None)))
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.config['hparas']['batch_size'],
+            num_workers=self.config['num_workers'],
+            shuffle=False,
+            collate_fn=self.collate_fn
+        )
+        return dataloader
+    
+    def test_dataloader(self):
+        dataset = self.speech_commands_dataset['test']
+        # remove silence 
+        dataset = dataset.filter(lambda example: (not ('_silence_' in example['file'])) and (not (example['audio']['array'] is None)))
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            batch_size=self.config['hparas']['batch_size'],
+            num_workers=self.config['num_workers'],
+            shuffle=False,
+            collate_fn=self.collate_fn
+        )
+        return dataloader
+
+    def total_training_steps(self) -> int:
+        dataset_size = len(self.train_dataloader())
+        num_devices = self.config['num_gpus']
+        effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
+        max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
+
+        if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps and self.trainer.max_steps != -1:
+            return int(self.trainer.max_steps)
+        return int(max_estimated_steps)
+
+    def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
+        return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
+    
+
+
 def cli_main(args):
     L.seed_everything(args.random_seed)
 
@@ -278,6 +501,19 @@ def cli_main(args):
 
     # update config for transfer learning task
     # config['data'] = {}
+
+    use_byola = False 
+    if 'byol-a' in str(config_path):
+        use_byola = True 
+        config['model'] = {}
+        config['hparas'] = {}
+        config['audio_transforms'] = {} 
+        # config['audio_transforms']['low_snr'] = -10
+        # config['audio_transforms']['high_snr'] = 10
+        # config['audio_transforms']['rms_level'] = 60
+        config['model']['arch_kwargs'] = {}
+        config['data'] = {}
+
     config['num_workers'] = args.num_workers
     config['num_gpus'] = args.gpus
     config['hparas']['batch_size'] = args.batch_size
@@ -309,18 +545,22 @@ def cli_main(args):
     checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
     if args.ckpt_path == "":
         ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        ckpt_path = ckpt_paths[-1] # get latest checkpoint 
-        print(ckpt_path)
+        if len(ckpt_paths) > 0:
+            ckpt_path = ckpt_paths[-1] # get latest checkpoint 
+            print(ckpt_path)
         ckpt_modifier = ''
 
     else:
         ckpt_path = args.ckpt_path
         ckpt_modifier = '_from_best_val_ckpt'
     
-    str_modifier = f"{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
+    str_modifier = f"{config['hparas']['optimizer']}_{args.layer_str}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/speech_commands_linear_classifier_checkpoints/{str_modifier}"
 
-    module = SSLClassifier(config=config,
+    if use_byola:
+        module = BYOLAClassifier(config=config)
+    else:
+        module = SSLClassifier(config=config,
                            ckpt_path=ckpt_path,
                            layer_out=args.layer_str)
 
@@ -352,9 +592,10 @@ def cli_main(args):
             verbose=True,
         ))
     # callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
+    log_basename = 'byol-a_base' if use_byola else config_path.stem
 
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
-                               name=f"{config_path.stem}_speech_commands_classifier_{str_modifier}",
+                               name=f"{log_basename}_speech_commands_classifier_{str_modifier}",
                                group='speech_commands_classifier',
                                project='cochdnn')
 
