@@ -88,7 +88,7 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --layer_str 'relu4' \
+                                   --layer_str 'relu3' \
                                    --optimizer "AdamW" --lr 0.01 \
                                    --task 'word' \
                                    --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep

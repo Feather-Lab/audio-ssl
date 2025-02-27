@@ -62,15 +62,79 @@ class SSLClassifier(L.LightningModule):
         self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
         self.feature_extractor = torch.compile(self.feature_extractor)
         self.feature_extractor.freeze()
+        self.time_avg_rep = config['model']['arch_kwargs'].get('time_average', True)
+
         # softcode size dict at some point 
 
         if config['model']['arch_kwargs']['backbone'] == 'kell2018':
-            layer_size_dict = {'avgpool':512*9*5,
-                               'relufc':4096}
+            if self.time_avg_rep:
+                layer_size_dict = {'input_after_preproc': 211,
+                                    'batchnorm0': 211,
+                                    'conv0': 6816,
+                                    'relu0': 6816,
+                                    'maxpool0': 3456,
+                                    'batchnorm1': 3456,
+                                    'conv1': 4608,
+                                    'relu1': 4608,
+                                    'maxpool1': 2304,
+                                    'batchnorm2': 2304,
+                                    'conv2': 4608,
+                                    'relu2': 4608,
+                                    'conv3': 9216,
+                                    'relu3': 9216,
+                                    'conv4': 4608,
+                                    'relu4': 4608,
+                                    'avgpool': 2560,
+                                    'xview': 23040,
+                                    'fullyconnected': 4096,
+                                    'relufc': 4096}
+            else:
+                layer_size_dict = {'input_after_preproc': 82290,
+                                    'batchnorm0': 82290,
+                                    'conv0': 886080,
+                                    'relu0': 886080,
+                                    'maxpool0': 224640,
+                                    'batchnorm1': 224640,
+                                    'conv1': 152064,
+                                    'relu1': 152064,
+                                    'maxpool1': 39168,
+                                    'batchnorm2': 39168,
+                                    'conv2': 78336,
+                                    'relu2': 78336,
+                                    'conv3': 156672,
+                                    'relu3': 156672,
+                                    'conv4': 78336,
+                                    'relu4': 78336,
+                                    'avgpool': 23040,
+                                    'xview': 23040,
+                                    'fullyconnected': 4096,
+                                    'relufc': 4096}
             
         elif config['model']['arch_kwargs']['backbone'] == 'resnet18':
-                layer_size_dict = {'avgpool': 512,
-                                'final': 512}
+            if self.time_avg_rep:
+                layer_size_dict = {'input_after_preproc': 211,
+                                    'conv1': 6784,
+                                    'bn1': 6784,
+                                    'conv1_relu1': 6784,
+                                    'maxpool1': 3392,
+                                    'layer1': 3392,
+                                    'layer2': 3456,
+                                    'layer3': 3584,
+                                    'layer4': 3584,
+                                    'avgpool': 512,
+                                    'final': 512}
+            else:
+                layer_size_dict = {'input_after_preproc': 82290,
+                                    'conv1': 1322880,
+                                    'bn1': 1322880,
+                                    'conv1_relu1': 1322880,
+                                    'maxpool1': 332416,
+                                    'layer1': 332416,
+                                    'layer2': 169344,
+                                    'layer3': 89600,
+                                    'layer4': 46592,
+                                    'avgpool': 512,
+                                    'final': 512}
         else:
 
             layer_size_dict = {'input_after_preproc': 211,
@@ -121,11 +185,10 @@ class SSLClassifier(L.LightningModule):
         with torch.no_grad():
             predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
             activations = all_outputs[self.layer_out]
-            if self.layer_out in [ 'avgpool', 'final', 'relufc']:
-                activations = activations.view(activations.shape[0], -1)
-            else:
-                # time average then flatten
+            if self.time_avg_rep:
                 activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+            else:
+                activations = activations.view(activations.shape[0], -1)
             activations = activations.detach()
         if self.mlp:
             activations = self.mlp(activations)
@@ -524,6 +587,11 @@ def cli_main(args):
     config['hparas']['epochs'] = 5
     # don't load in classifier head if it exists 
     config['model']['arch_kwargs']['supervised'] =  False
+    config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
+
+    time_avg_str = ""
+    if not args.time_avg_rep:
+        time_avg_str = "full_rep_"
 
     scheduler_str = ""
     if args.lr_scheduler:
@@ -554,7 +622,7 @@ def cli_main(args):
         ckpt_path = args.ckpt_path
         ckpt_modifier = '_from_best_val_ckpt'
     
-    str_modifier = f"{config['hparas']['optimizer']}_{args.layer_str}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
+    str_modifier = f"{config['hparas']['optimizer']}_{args.layer_str}_{time_avg_str}{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/speech_commands_linear_classifier_checkpoints/{str_modifier}"
 
     if use_byola:
@@ -711,6 +779,8 @@ if __name__ == "__main__":
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
     parser.add_argument('--lr_scheduler', action=BooleanOptionalAction, help='Use lr scheduler?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
+    parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
+
     args = parser.parse_args()
 
     cli_main(args)
