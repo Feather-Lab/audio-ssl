@@ -19,8 +19,8 @@ module load cuda cudnn nccl
 
 conda activate ~/ceph/conda_envs/cochdnn_ssl_pl
 
-export NCCL_DEBUG=INFO
-export PYTHONFAULTHANDLER=1
+# export NCCL_DEBUG=INFO
+# export PYTHONFAULTHANDLER=1
 
 export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
 master_node=$SLURMD_NODENAME

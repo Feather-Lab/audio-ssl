@@ -14,9 +14,9 @@
 
 conda activate cochdnn_ssl_pl
 
-export NCCL_DEBUG=WARN
-export PYTHONFAULTHANDLER=1
-export TORCH_DISTRIBUTED_DEBUG=DETAIL
+# export NCCL_DEBUG=WARN
+# export PYTHONFAULTHANDLER=1
+# export TORCH_DISTRIBUTED_DEBUG=DETAIL
 
 export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
 master_node=$SLURMD_NODENAME
