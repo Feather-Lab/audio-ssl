@@ -6,6 +6,7 @@ import yaml
 import sys, os
 import pickle
 from lightning_ssl import LitAudioSSL 
+from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
@@ -33,19 +34,35 @@ torch.backends.cudnn.allow_tf32 = True
 # TODO: refactor for different models - current setup is unreadable
 
 class SSLClassifier(L.LightningModule):
-    def __init__(self, config, ckpt_path, layer_out):
+    def __init__(self, config, ckpt_path, layer_out, supervised_backbone=False):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
         self.layer_out = layer_out
         # init the pretrained LightningModule
         # Set strict to false to ignore loading in pre-trained classifier 
-        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+        if supervised_backbone:
+            self.feature_extractor = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+            self.config['model']['arch_kwargs']['backbone'] = config['model']['arch_name']
+
+        else:
+            self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
         self.feature_extractor = torch.compile(self.feature_extractor)
         self.feature_extractor.freeze()
         # softcode size dict at some point 
         self.time_avg_rep = config['model']['arch_kwargs'].get('time_average', True)
+        self.crop_audio = config.get('crop_audio', False)
+        if self.crop_audio:
+            self.audio_crop = at.CenterCropForegroundBackground(signal_size=40_000, crop_length=20_000) # random crop to 1 second, centered on word
 
+        self.transforms = at.AudioCompose([
+                at.AudioToTensor(),
+                at.CombineWithRandomDBSNR(low_snr=-10,
+                                        high_snr=10),
+                at.DBSPLNormalizeForegroundAndBackground(dbspl=60),
+                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+            ])
+        
         if config['model']['arch_kwargs']['backbone'] == 'kell2018':
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
@@ -90,7 +107,7 @@ class SSLClassifier(L.LightningModule):
                                     'fullyconnected': 4096,
                                     'relufc': 4096}
             
-        elif config['model']['arch_kwargs']['backbone'] == 'resnet18':
+        elif config['model']['arch_kwargs']['backbone'] in ['resnet18', 'resnet_multi_task18']:
                 if self.time_avg_rep:
                     layer_size_dict = {'input_after_preproc': 211,
                                         'conv1': 6784,
@@ -274,7 +291,13 @@ class SSLClassifier(L.LightningModule):
                 noise = noise
             else:
                 noise = None 
-            signal, _ = self.feature_extractor.transforms(signal, noise)
+            if self.crop_audio:
+                signal, noise = self.audio_crop(signal, noise)
+                ## Pad back to full length 
+                signal = at.pad_or_trim_to_len(signal, 40000, mode="both")
+                if noise is not None:
+                    noise = at.pad_or_trim_to_len(noise, 40000, mode="both")
+            signal, _ = self.transforms(signal, noise)
             if signal is None:
                 # Signal was none & has null label class 
                 signal = torch.zeros(1,40000)
@@ -296,7 +319,7 @@ class SSLClassifier(L.LightningModule):
         # Only fit on clean targets 
         for (signal, noise) in  zip(*batch[:2]):
             # use transforms pre-defined in feature_extractor - None instead of noise to skip
-            signal, _ = self.feature_extractor.transforms(signal, None)
+            signal, _ = self.transforms(signal, None)
             if signal is None:
                 # Signal was none & has null label class 
                 signal = torch.zeros(1,40000)
@@ -647,13 +670,21 @@ def cli_main(args):
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
     # used 2 gpus for training, mult by 2 for now to get same checkpoint 
-    config['model']['arch_kwargs']['supervised'] =  False
+    if not args.supervised_backbone:
+        config['model']['arch_kwargs']['supervised'] =  False
 
     config['with_noise'] = args.with_noise
     # don't load in classifier head if it exists 
     config['hparas']['lr'] = args.lr 
-    config['hparas']['epochs'] = 1
+    config['hparas']['epochs'] = 3
+    if 'arch_kwargs' not in config['model'].keys():
+        config['model']['arch_kwargs'] = {}
     config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
+    config['crop_audio'] = args.crop_audio
+
+    crop_audio_str = ""
+    if  args.crop_audio:
+        crop_audio_str = "_middle_crop"
 
     time_avg_str = ""
     if not args.time_avg_rep:
@@ -703,7 +734,7 @@ def cli_main(args):
         ckpt_modifier = '_from_best_val_ckpt'
     
     w_noise_modifier = '_with_noise' if args.with_noise else ""
-    str_modifier = f"{task_str}_{args.layer_str}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}"
+    str_modifier = f"{task_str}_{args.layer_str}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     if use_byola:
@@ -711,7 +742,8 @@ def cli_main(args):
     else:
         module = SSLClassifier(config=config,
                             ckpt_path=ckpt_path,
-                            layer_out=args.layer_str)
+                            layer_out=args.layer_str,
+                            supervised_backbone=args.supervised_backbone)
 
     ## Check if existing classifier_ckpt exists 
     classifier_ckpts = list(classifier_checkpoint_dir.rglob("*.ckpt"))
@@ -897,9 +929,11 @@ if __name__ == "__main__":
     parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
     parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
     parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
+    parser.add_argument('--crop_audio', action=BooleanOptionalAction, help='Randomly crop audio to 1 second, centered on word?')
     parser.add_argument('--use_classifier_ckpt', action=BooleanOptionalAction, help='Use existing classifer ckpt?')
     parser.add_argument('--mlp_dim', default=512, type=int, help='Hidden dim of MLP.')
     parser.add_argument('--lr_scheduler', action=BooleanOptionalAction, help='Use lr scheduler?')
+    parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     args = parser.parse_args()
 

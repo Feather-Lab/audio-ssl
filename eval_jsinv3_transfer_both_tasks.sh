@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=80Gb
-#SBATCH --time=5:00:00 # approx 6 if training classifier from scratch. 10 min if just evaling
+#SBATCH --time=4:00:00 # approx 6 if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
@@ -52,13 +52,13 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --ckpt_path model_checkpoints/barlow_word_resnet18_base_Matched_blocked_batches_lmbda_1e-1_3-layer_proj/checkpoints/epoch=54-step=9900-best_speaker_task.ckpt \
 #                                 #    --overwrite
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_proj_1024_avg_pool.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'layer4' \
-#                                    --optimizer "AdamW" --lr 0.01 \
-#                                    --with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_proj_1024_avg_pool.yaml \
+                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+                                   --model_ckpt_dir model_checkpoints \
+                                   --batch_size 192 \
+                                   --layer_str 'layer3' \
+                                   --optimizer "AdamW" --lr 0.01 \
+                                   --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
 
                                 #    --ckpt_path  \
                                 #    --overwrite
@@ -84,14 +84,33 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --with_noise --no-eval_only
 #                                 #    --overwrite
 
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-                                   --model_ckpt_dir model_checkpoints \
-                                   --batch_size 192 \
-                                   --layer_str 'relu3' \
-                                   --optimizer "AdamW" --lr 0.01 \
-                                   --task 'word' \
-                                   --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relu2' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'word' \
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --crop_audio
+                                   
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_5e-3_lr_2e-1_w_augment_per_frame.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'layer2' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'word' \
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep #--crop_audio
+                                   
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/word_resnet18_MatchedDataset_LARS.yaml\
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'avgpool' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'word' \
+#                                    --with_noise --no-eval_only --no-lr_scheduler \
+#                                    --no-use_classifier_ckpt --no-time_avg_rep --supervised_backbone
                                    
                                  #   --ckpt_path model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=160-step=28980-best_word_task.ckpt \
                                 #    --overwrite
@@ -116,7 +135,7 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
 #                                    --model_ckpt_dir model_checkpoints \
 #                                    --batch_size 192 \
 #                                    --layer_str 'avgpool' \
-#                                    --optimizer "AdamW" --lr 0.001 \
+#                                    --optimizer "AdamW" --lr 0.01 \
 #                                    --task 'word' \
-#                                    --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --crop_audio
                                    

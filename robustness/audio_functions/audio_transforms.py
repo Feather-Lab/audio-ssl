@@ -754,11 +754,15 @@ class MatchedRandomSignalCrops(torch.nn.Module):
 
     def __call__(self, signal_1, signal_2):
         # assumes signal_1 is shorter than signal_2 (so crop_idx_1 is valid for signal_2)
-        if len(signal_1) > len(signal_2):
-            print('Warning: signal_1 is longer than signal_2 for matched Cropping')
+        if isinstance(signal_2, (np.ndarray, torch.Tensor)):
+            if len(signal_1) > len(signal_2):
+                print('Warning: signal_1 is longer than signal_2 for matched Cropping')
 
         start_idx_1 = np.random.randint(signal_1.shape[0] - self.crop_length)
         cropped_1 = signal_1[start_idx_1:start_idx_1+self.crop_length]
+
+        if signal_2 is None:
+            return cropped_1, None
 
         # crop second signal so that the word is in the same start position
         start_idx_2 = start_idx_1 + (len(signal_2) - len(signal_1)) // 2
@@ -1034,66 +1038,3 @@ def sample_augments(speech=True,
 
     return aug_dict
 
-
-
-
-
-
-# def sample_augments(speech=True,
-#                     sample_rate=20_000,
-#                     effect_types = ['filter', 'pitch',  'tempo'],
-#                     ):
-#     """
-#     """
-#     # Sample bandpass filter parameters
-#     n_effects = np.random.randint(low=0, high=len(effect_types)+1)
-#     effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
-#     # sample if using filtering
-#     dict_kwargs_butterworth = {} 
-#     if 'filter' in effect_choice:
-#         nyquist = (sample_rate // 2) - 1 # limit must be exactly under and not equal to for filtering 
-#         if speech:
-#             ## Use frequency ranges that overlap speech signals 
-#             range_bandpass_freq_low = [4e1, 4e2]
-#             range_bandpass_freq_high = [4e3, 10e3]
-#             bandpass_freq_low = loguniform(*range_bandpass_freq_low)
-#             bandpass_freq_high = loguniform(*range_bandpass_freq_high)
-#         else:
-#             ## Can use wider frequency range for non-speech signals
-#             range_bandpass_center_frequency = [16e1, 10e3]
-#             range_bandpass_bandwidth_octave = [2, 4]
-#             bandpass_center_frequency = loguniform(*range_bandpass_center_frequency)
-#             bandpass_bandwidth_octave = loguniform(*range_bandpass_bandwidth_octave)
-#             bandpass_freq_low = np.power(2, -bandpass_bandwidth_octave/2) * bandpass_center_frequency
-#             bandpass_freq_high = np.power(2, bandpass_bandwidth_octave/2) * bandpass_center_frequency
-#         # sample order for nth order butterworth filter 
-#         list_bandpass_order = [1, 2, 3, 4]
-#         bandpass_order_int = np.random.choice(list_bandpass_order)
-#         # clip hz based on nyquist 
-#         if bandpass_freq_low < 20:
-#             bandpass_freq_low = 20 
-#         if bandpass_freq_high > nyquist:
-#             bandpass_freq_high = nyquist 
-
-#         # stack as kwargs dict 
-#         dict_kwargs_butterworth = {'order': bandpass_order_int,
-#                             'cutoff': [bandpass_freq_low, bandpass_freq_high],
-#                             'btype': 'bandpass'
-#                             }
-
-#     # Sample sox augmentations
-#     effects_to_apply = []
-#     if n_effects > 0:
-#         for effect in effect_choice:
-#             if effect == 'pitch':
-#                 pitch_n_semitones = np.random.uniform(-0.5, 0.5)
-#                 # pitch args are n semitones
-#                 effects_to_apply.append(['pitch', f"{pitch_n_semitones}"])
-#                 # chain resample for identical output from sox 
-#                 # effects_to_apply.append(['rate', f"{sample_rate}"])
-#             elif effect == 'tempo':
-#                 tempo_factor = np.random.uniform(0.90, 1.10)
-#                 # tempo args are factor
-#                 effects_to_apply.append(['tempo', f"{tempo_factor}"])
-
-#     return dict_kwargs_butterworth, effects_to_apply
