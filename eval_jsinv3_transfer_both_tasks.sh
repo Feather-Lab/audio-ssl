@@ -63,16 +63,6 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                 #    --ckpt_path  \
                                 #    --overwrite
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-                              #      --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-                              #      --model_ckpt_dir model_checkpoints \
-                              #      --batch_size 96 \
-                              #      --layer_str 'relufc' \
-                              #      --optimizer "AdamW" --lr 0.001 \
-                              #      --ckpt_path model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=99-step=18000-best_val.ckpt \
-                              #      --with_noise --no-eval_only
-                              #   #    --overwrite
-
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --model_ckpt_dir model_checkpoints \
@@ -102,7 +92,7 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
 #                                    --task 'word' \
 #                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep #--crop_audio
                                    
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/word_resnet18_MatchedDataset_LARS.yaml\
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/word_resnet18_MatchedDataset_LARS.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --model_ckpt_dir model_checkpoints \
 #                                    --batch_size 192 \
