@@ -394,8 +394,8 @@ def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
             sound, SR = audio_helpers.load_audio_wav_resample(audio_path, 
                                                              resample_SR=20000, 
                                                              DUR_SECS=DUR_SECS,
-                                                             START_SECS='random',
-                                                             as_float32=True)
+                                                             START_SECS='random',)
+                                                            #  as_float32=True)
 
             while sum(sound)==0: # If sound is silent, choose a new clip       
                 # sound, SR = synthhelpers.load_audio_wav_resample(audio_path, 
@@ -404,8 +404,8 @@ def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
                 sound, SR = audio_helpers.load_audio_wav_resample(audio_path, 
                                                                  resample_SR=20000, 
                                                                  DUR_SECS=DUR_SECS,
-                                                                 START_SECS='random',
-                                                                 as_float32=True)
+                                                                 START_SECS='random',)
+                                                                #  as_float32=True)
             sound_array.append(preproc_sound_np(sound)) # normalize
 
         sound = sound_array

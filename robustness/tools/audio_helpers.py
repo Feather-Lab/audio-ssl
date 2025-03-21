@@ -4,7 +4,7 @@ import scipy.io
 import scipy.io.wavfile
 import numpy as np
 
-def load_audio_wav_resample(audio_path, DUR_SECS = 2, resample_SR = 16000, START_SECS=0, return_mono=True, as_float32=False):
+def load_audio_wav_resample(audio_path, DUR_SECS = 2, resample_SR = 16000, START_SECS=0, return_mono=True):
     """
     Loads a .wav file, chooses the length, and resamples to the desired rate.
 
@@ -25,9 +25,8 @@ def load_audio_wav_resample(audio_path, DUR_SECS = 2, resample_SR = 16000, START
 
     """
     SR, audio = scipy.io.wavfile.read(audio_path)
-    if as_float32 and audio.dtype == 'int16':
-        #convert from int16 to float 32: means changing dtype and normalizing by max bitdepth 
-        audio = audio.astype('float32') / np.iinfo(np.int16).max 
+    if audio.dtype in ['int16', 'int32']:
+        audio = audio.astype(np.float32)
     if DUR_SECS!='full':
         if (len(audio))/SR<DUR_SECS:
             print("PROBLEM WITH LOAD AUDIO WAV: The sound is only %d second while you requested %d seconds long"%(int((len(audio))/SR), DUR_SECS))
