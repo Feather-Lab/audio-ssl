@@ -48,7 +48,9 @@ class LitAudioSSL(L.LightningModule):
 
         # Get audio model from config kwargs
         self.model = architectures.__dict__[self.config['model']['arch_name']](**self.config['model']['arch_kwargs'])
-        self.metamer_layers = [
+
+        if 'resnet' in self.config['model']['arch_kwargs']['backbone']:
+            self.metamer_layers = [
             'input_after_preproc',
             'conv1',
             'bn1',
@@ -60,6 +62,29 @@ class LitAudioSSL(L.LightningModule):
             'layer4',
             'avgpool',
         ]
+        elif 'kell2018' in self.config['model']['arch_kwargs']['backbone']:
+            self.metamer_layers = [
+                'input_after_preproc',
+                'batchnorm0',
+                'conv0',
+                'relu0',
+                'maxpool0',
+                'batchnorm1',
+                'conv1',
+                'relu1',
+                'maxpool1',
+                'batchnorm2',
+                'conv2',
+                'relu2',
+                'conv3',
+                'relu3',
+                'conv4',
+                'relu4',
+                'avgpool',
+                'fullyconnected',
+                'relufc',
+                'dropout',
+                ]
 
         # If computing rep on gpu, compose rep and model in same forward pass for convenience
         self.model = ModelWithFrontEnd(self.audio_rep, self.model)

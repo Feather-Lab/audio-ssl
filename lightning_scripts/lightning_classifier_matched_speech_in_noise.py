@@ -41,18 +41,43 @@ class LitWordAudioSetModel(L.LightningModule):
 
         # Get audio model from config kwargs
         self.model = architectures.__dict__[self.config['model']['arch_name']](**self.config['model']['arch_params'])
-        self.metamer_layers = [
-            'input_after_preproc',
-            'conv1',
-            'bn1',
-            'conv1_relu1',
-            'maxpool1',
-            'layer1',
-            'layer2',
-            'layer3',
-            'layer4',
-            'avgpool'
-        ]
+        if 'resnet' in self.config['model']['arch_name']:
+            self.metamer_layers = [
+                'input_after_preproc',
+                'conv1',
+                'bn1',
+                'conv1_relu1',
+                'maxpool1',
+                'layer1',
+                'layer2',
+                'layer3',
+                'layer4',
+                'avgpool',
+            ]
+            
+        elif 'kell2018' in self.config['model']['arch_name']:
+            self.metamer_layers = [
+                'input_after_preproc',
+                'batchnorm0',
+                'conv0',
+                'relu0',
+                'maxpool0',
+                'batchnorm1',
+                'conv1',
+                'relu1',
+                'maxpool1',
+                'batchnorm2',
+                'conv2',
+                'relu2',
+                'conv3',
+                'relu3',
+                'conv4',
+                'relu4',
+                'avgpool',
+                'fullyconnected',
+                'relufc',
+                'dropout',
+                ]
 
         self.model = ModelWithFrontEnd(self.audio_rep, self.model)
 
@@ -152,12 +177,31 @@ class LitWordAudioSetModel(L.LightningModule):
         else:
             opt = getattr(torch.optim, self.config['hparas']['optimizer'])
             self.optimizer = opt(self.model.parameters(),  **self.config['hparas']['optimizer_kwargs'])     
-            self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
-            return [self.optimizer],   {
+            if self.config['hparas'].get('step_lr', False):
+                self.schedule = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=self.config['hparas']['step_lr']) 
+                return [self.optimizer], [
+                    {
                         'scheduler': self.schedule,  # The LR scheduler instance (required)
                         'interval': 'epoch',  # The unit of the scheduler's step size
                     }
-
+                ]
+            else:
+                total_training_steps = self.total_training_steps()
+                num_warmup_steps = self.compute_warmup(total_training_steps, self.config['hparas']['num_warmup_steps_or_ratio'])
+                lr_scheduler = CosineWarmupScheduler(
+                    optimizer=self.optimizer,
+                    batch_size=self.config['hparas']['global_batch_size'], # is global batch size
+                    warmup_steps=num_warmup_steps,
+                    max_steps=total_training_steps,
+                    lr=self.config['hparas']['optimizer_kwargs']['lr']
+                )
+                return [self.optimizer],   [
+                        {
+                                
+                            'scheduler': lr_scheduler,  # The LR scheduler instance (required)
+                            'interval': 'step',  # The unit of the scheduler's step size
+                    }
+                ]
     def forward(self, x):
         """
         PL required forward wrapper. Enables calling model in two ways:
