@@ -10,7 +10,8 @@ class Paired_Loss(nn.Module):
 
         Args:
         loss_fn_inv: nn.Module, base SSL loss function to be used for invariant loss
-        loss_fn_eq: nn.Module, base SSL loss function to be used for equivariant loss
+        loss_fn_eq:  nn.Module, base SSL loss function to be used for equivariant loss
+        lmbda:       float, weight for equivariant loss in total loss 
         """
         super(Paired_Loss, self).__init__()
         self.loss_fn_inv = loss_fn_inv

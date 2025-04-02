@@ -128,11 +128,22 @@ class SSLBaseModelDualTask(nn.Module):
         super().__init__()
         self.supervised = supervised
         self.backbone = backbone
-
         self.f = robustness_architectures.__dict__[backbone]()
-        self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-        self.f.fc = nn.Identity()
 
+        if 'resnet' in backbone:
+            self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+            self.f.fc = nn.Identity()
+            if "max_to_avg_pool" in kwargs:
+                self.f.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+            if self.frame_wise_loss:
+                # don't average over time dimensions - will fold into batch dimension 
+                self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
+                # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
+                self.ssl_rep_name = 'layer4'
+
+        elif 'kell' in backbone:
+            self.f.dropout = nn.Identity()
+            self.f.classification = nn.Identity()
         # projection head (Following exactly barlow twins offical repo)
         ## Assumes same dims for inv and equi tasks 
         projector_dims = [proj_out_dim] + projector_dims
