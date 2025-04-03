@@ -695,6 +695,7 @@ if __name__ == '__main__':
     from lightning_ssl import LitAudioSSL
     from lightning_ssl_audioset import LitAudioSetSSL
     from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
+    from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 
 
     #########PARSE THE ARGUMENTS FOR THE FUNCTION#########
@@ -761,7 +762,10 @@ if __name__ == '__main__':
     elif 'ssl' in config_path.stem:
         module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
-        module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        if config['hparas'].get('ssl_task', False):
+            module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        else:
+            module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     else:
         module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         
