@@ -21,8 +21,13 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml  \
-                                   --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml  \
+#                                    --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt
+
+
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1.yaml  \
+                                   --ckpt_path model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1/checkpoints/epoch=51-step=9360-best_val.ckpt
+
 
 
 
