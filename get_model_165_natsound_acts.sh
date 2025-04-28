@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=measure_165_natsound_acts
-#SBATCH --output=outLogs/measure_165_natsound_acts_%j.out
-#SBATCH --error=outLogs/measure_165_natsound_acts_%j.err
+#SBATCH --output=outLogs/measure_165_natsound_acts_%A_%a.out
+#SBATCH --error=outLogs/measure_165_natsound_acts_%A_%a.err
 #SBATCH --cpus-per-gpu=2
 #SBATCH --gpus=1
 
@@ -9,6 +9,7 @@
 #SBATCH --time=00:10:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
+#SBATCH --array=0-5 # 0-5 in equivariant manifest
 
 module load cuda cudnn nccl
 
@@ -24,9 +25,17 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml  \
 #                                    --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt
 
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml  \
+                                   --dir_name_modifier "latest_ckpt"
+                                #    --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt \
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1.yaml  \
-                                   --ckpt_path model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1/checkpoints/epoch=51-step=9360-best_val.ckpt
+
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1.yaml  \
+#                                    --ckpt_path model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1/checkpoints/epoch=51-step=9360-best_val.ckpt
+
+
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_list_path eval_config_manifests/barlow_equivariant_lmbda_search_kell2018.pkl  \
+#                                                                                 --array_ix $SLURM_ARRAY_TASK_ID --dir_name_modifier "latest_ckpt"
 
 
 

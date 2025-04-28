@@ -9,8 +9,8 @@
 #SBATCH --mem=1000Gb
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu
+#SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
 #SBATCH -N 1
-#SBATCH --constraint=h100  # if you want a particular type of GPU
 #SBATCH --array=0-5 # 0-5 in manifest
 
 # module purge

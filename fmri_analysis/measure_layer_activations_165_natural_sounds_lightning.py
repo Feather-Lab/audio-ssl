@@ -98,8 +98,7 @@ def cli_main(args):
         ckpt_path = ckpt_paths[-1] # get latest checkpoint 
     else:
         ckpt_path = args.ckpt_path
-    print(ckpt_path)
-    print(f"Features from checkpoint: {config_path}")
+    print(f"Features from checkpoint: {ckpt_path}")
 
     ############LOAD NETWORK############
     if "supervised" in str(config_path):
@@ -111,7 +110,8 @@ def cli_main(args):
 
     ##############Begin Define Parameters#################
     save_features_dir = pathlib.Path(args.save_features_dir)
-    save_features_dir = save_features_dir / config_path.stem
+    model_name_modfier = f"_{args.dir_name_modifier}" if args.dir_name_modifier != '' else ''
+    save_features_dir = save_features_dir / f"{config_path.stem}{model_name_modfier}"
     if not save_features_dir.is_dir():
         save_features_dir.mkdir(parents=True, exist_ok=True)
    
@@ -200,6 +200,12 @@ if __name__ == "__main__":
         default=pathlib.Path("./fmri_analysis_model_features"),
         type=pathlib.Path,
         help="Directory where model features will be saved. (Default: './eval_jsin_results')",
+    )
+    parser.add_argument(
+        "--dir_name_modifier",
+        default='',
+        type=str,
+        help="Additional text to append to directory name (e.g. latest_ckpt)"
     )
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     args = parser.parse_args()

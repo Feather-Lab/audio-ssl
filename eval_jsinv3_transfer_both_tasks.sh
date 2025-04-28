@@ -83,11 +83,11 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --task 'word' \
 #                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --crop_audio
                                    
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_resnet18_Matched_blocked_batches_lmbda_5e-3_lr_2e-1_w_augment_per_frame.yaml \
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_5e-3_lr_2e-1_w_augment.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --model_ckpt_dir model_checkpoints \
 #                                    --batch_size 192 \
-#                                    --layer_str 'layer2' \
+#                                    --layer_str 'relu2' \
 #                                    --optimizer "AdamW" --lr 0.01 \
 #                                    --task 'word' \
 #                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep #--crop_audio
@@ -125,7 +125,16 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                    --layer_str 'relu2' \
                                    --optimizer "AdamW" --lr 0.01 \
                                    --task 'word' \
-                                   --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+                                   --with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/equi_lmbda_search/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relu3' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep
+                                #    --task 'word' \
 
 
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path byol-a/config.yaml \
