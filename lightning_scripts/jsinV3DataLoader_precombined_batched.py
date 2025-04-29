@@ -22,8 +22,7 @@ class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
     ]
 
     def __init__(
-        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3
-    ):
+        self, root, train=True, download=False, transform=None, batch_size=1, eval_max=3, train_max=-1):
         """
         Builds the pytorch hdf5 combined dataset from the files found in the
         specified root directory.
@@ -32,6 +31,8 @@ class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
 
         if train:
             self.all_hdf5_files = glob.glob(root + "/train_*/" + self.hdf5_glob)
+            if train_max > -1:
+                self.all_hdf5_files = self.all_hdf5_files[:train_max]
         else:
             if eval_max == -1:
                 self.all_hdf5_files = glob.glob(root + "/valid_*/" + self.hdf5_glob)

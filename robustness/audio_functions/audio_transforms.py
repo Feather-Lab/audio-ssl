@@ -45,6 +45,39 @@ def ch_rms(x, dim=0):
     rms_x = torch.sqrt(torch.mean(torch.pow(x, 2), dim=dim))
     return rms_x
 
+def np_demean(x, axis=0):
+    '''
+    Helper function to mean-subtract tensor.
+    
+    Args
+    ----
+    x (nd.array): array to be mean-subtracted
+    axis (int): kwarg for numpy.mean (axis along which to compute mean)
+    
+    Returns
+    -------
+    x_demean (nd.array): mean-subtracted tensor
+    '''
+    x_demean = np.subtract(x, np.mean(x, axis=axis))
+    return x_demean
+
+
+def np_rms(x, axis=0):
+    '''
+    Helper function to compute RMS amplitude of a tensor.
+    
+    Args
+    ----
+    x (np.ndarray): tensor for which RMS amplitude should be computed
+    axis (int): kwarg for np.mean (axis along which to compute mean)
+    
+    Returns
+    -------
+    rms_x (np.ndarray): root-mean-square amplitude of x
+    '''
+    rms_x = np.sqrt(np.mean(np.power(x, 2), axis=axis))
+    return rms_x
+
 
 class AudioCompose(torch.nn.Module):
     """
@@ -476,14 +509,22 @@ class DBSPLNormalizeForegroundAndBackground(torch.nn.Module):
 
     Args:
         dbspl (float): desired sound pressure level in dB re 20e-6 Pa
+        use_np (bool): Use torch or numpy operations
 
     Returns:
         foreground_wav, background_wav
     """
-    def __init__(self, dbspl=60):
+    def __init__(self, dbspl=60, use_np=False):
         super(DBSPLNormalizeForegroundAndBackground, self).__init__()
         self.dbspl=dbspl
+        self.use_np=use_np
         self.rms_level = 20e-6 * np.power(10.0, self.dbspl / 20.0)
+        if self.use_np:
+            self.demean = np_demean
+            self.rms = np_rms
+        else:
+            self.demean = ch_demean
+            self.rms = ch_rms
 
     def forward(self, foreground_wav, background_wav):
         """
@@ -494,16 +535,17 @@ class DBSPLNormalizeForegroundAndBackground(torch.nn.Module):
                 the background audio sample
         """
         if foreground_wav is not None:
-            foreground_wav = ch_demean(foreground_wav)
-            rms_foreground = ch_rms(foreground_wav)
+
+            foreground_wav = self.demean(foreground_wav)
+            rms_foreground = self.rms(foreground_wav)
             if rms_foreground !=0:
                 foreground_wav = foreground_wav * self.rms_level / rms_foreground
             else:
                 foreground_wav = None
 
         if background_wav is not None:
-            background_wav = ch_demean(background_wav)
-            rms_background = ch_rms(background_wav)
+            background_wav = self.demean(background_wav)
+            rms_background = self.rms(background_wav)
             if rms_background !=0:
                 background_wav = background_wav * self.rms_level / rms_background
             else:
@@ -612,6 +654,16 @@ class RandomCrop:
         start_idx = np.random.randint(crop_bound)
         x = x[start_idx:start_idx+self.crop_length]
 
+        return x
+
+class CenterCrop:
+    def __init__(self, crop_length):
+        self.crop_length = crop_length
+
+    def __call__(self, x):
+        sig_len = len(x)
+        start_crop = int((sig_len - self.crop_length)/2)
+        x = x[start_crop : start_crop + self.crop_length]
         return x
 
 class CombineWithFixedDBSNR(torch.nn.Module):
@@ -730,17 +782,19 @@ class MatchedCombineWithRandomDBSNR(torch.nn.Module):
     """
     Combines two signals at the same random dB SNR level.
     """
-    def __init__(self, low_db=-10, high_db=10):
+    def __init__(self, low_db=-10, high_db=10, return_param: bool=False):
         super().__init__()
         self.low_db = low_db
         self.high_db = high_db
+        self.return_param = return_param
         self.combiner_random = CombineWithRandomDBSNRWithParam(low_db, high_db)
         self.combiner_fixed = CombineWithFixedDBSNR()
     
     def __call__(self, foreground_wav1, foreground_wav2, background_wav1, background_wav2):
         combined_1, rand_db_snr = self.combiner_random(foreground_wav1, background_wav1)
         combined_2 =  self.combiner_fixed(foreground_wav2, background_wav2, rand_db_snr)
-
+        if self.return_param:
+            return combined_1, combined_2, float(rand_db_snr)
         return combined_1, combined_2
 
 class MatchedRandomSignalCrops(torch.nn.Module):
@@ -791,72 +845,38 @@ class MatchedRandomSignalAugmentSox(torch.nn.Module):
         signal_2 = augment_excerpt(signal_2, aug_dict, sr=self.sample_rate)
 
         return signal_1, signal_2
-
-
-# class MatchedRandomSignalAugment(torch.nn.Module):
-#     """
-#     Randomly applies the same set of signal augmentations to two signals. 
-#     Samples whether to apply filtering, pitch shifting, or tempo change 
-#     augmentations to signals, and the parameters for each augmentation. 
-#     """
-#     def __init__(self, sampling_rate=20000, out_dur=40000):
-#         super().__init__()
-#         self.sampling_rate = sampling_rate
-#         self.out_dur = out_dur
     
-#     def apply_butterworth_filter(self,
-#                                 x,
-#                                 order,
-#                                 cutoff,
-#                                 btype='bandpass',
-#                                 ):
-#         """
-#         """
-#         if isinstance(x, torch.Tensor):
-#             x = x.numpy()
-#         dtype = x.dtype
-#         b, a = scipy.signal.butter(
-#             order,
-#             cutoff,
-#             btype=btype,
-#             analog=False,
-#             output='ba',
-#             fs=self.sampling_rate)
-#         x = scipy.signal.lfilter(b, a, x)
+class ApplySingleAugmentSox(torch.nn.Module):
+    """
+    Applies the same class of signal augmentation to signals. 
+    Either filtering, pitch shifting, or tempo change, determined 
+    by augment_type. Samplesthe parameters for each augmentation. 
+    """
+    def __init__(self, augment_type, sample_rate=20000, return_params: bool=False):
+        super().__init__()
+        self.augment_type = augment_type
+        self.sample_rate = sample_rate
+        self.return_params = return_params
 
-#         return x.astype(dtype)
-    
-#     def apply_sox_augments(self, x, sox_effects):
-#         if isinstance(x, np.ndarray):
-#             x = torch.from_numpy(x).float()
-#         if x.ndim == 1:
-#             x = x.unsqueeze(0)
-#         x, output_rate = apply_effects_tensor(x.float(), self.sampling_rate, sox_effects, channels_first=True)
-#         if output_rate != self.sampling_rate:
-#             x = torchaudio.functional.resample(x, output_rate, self.sampling_rate)
-#         # assert output_rate == self.sampling_rate, "Sox effects changed sample rate to {output_rate} from {self.sampling_rate}"
-#         x = x.squeeze()
-#         if len(x) < self.out_dur:
-#             pad_dur = (self.out_dur - len(x)) // 2 + 1 
-#             x = torch.nn.functional.pad(x, (pad_dur, pad_dur), mode='constant', value=0)
-#         return x
+    def __call__(self, signal,  speech=True, print_augments=False):
+        ### Get shared augmentations:
+        aug_dict = sample_augments(speech=speech,
+                                   effect_types=[self.augment_type],
+                                   always_return_effect=True)
+        if self.augment_type == 'filter':
+            params = aug_dict['kwargs_butterworth']
+            params = [params['order']] + params['cutoff']
+        elif self.augment_type == 'pitch':
+            params = aug_dict['kwargs_sox']['kwargs_pitch']['n_semitones']
+        elif self.augment_type == 'tempo':
+            params = aug_dict['kwargs_sox']['kwargs_tempo']['factor']
 
-#     def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
-#         ### Get shared augmentations:
-#         filter_kwargs, sox_effects = sample_augments(speech=speech)
-#         if print_augments:
-#             print(filter_kwargs)
-#             print(sox_effects)
-#         # apply to signal 1 
-#         if len(filter_kwargs) > 0:
-#             signal_1 = self.apply_butterworth_filter(signal_1, **filter_kwargs)
-#         signal_1 = self.apply_sox_augments(signal_1, sox_effects)
-
-#         # apply to signal 2 
-#         if len(filter_kwargs) > 0:
-#             signal_2 = self.apply_butterworth_filter(signal_2, **filter_kwargs)
-#         signal_2 = self.apply_sox_augments(signal_2, sox_effects)
-#         return signal_1, signal_2
+        if print_augments:
+            print(aug_dict)
+        signal = augment_excerpt(signal, aug_dict, sr=self.sample_rate)
+        if self.return_params:
+            return signal, params
+        return signal
 
 ###################################
 # Sox transforms for augmentations 
@@ -976,12 +996,15 @@ def augment_excerpt(y, aug_dict, sr=44100):
 def sample_augments(speech=True,
                     sample_rate=20_000,
                     effect_types = ['filter', 'pitch',  'tempo'],
-                    ):
+                    always_return_effect = False):
     """
     """
     # Sample bandpass filter parameters
-    n_effects = np.random.randint(low=0, high=len(effect_types)+1)
-    effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
+    if always_return_effect:
+        effect_choice = effect_types
+    else:
+        n_effects = np.random.randint(low=0, high=len(effect_types)+1)
+        effect_choice = np.random.choice(effect_types, size=n_effects, replace=False)
     # sample if using filtering
     aug_dict = {}
     if 'filter' in effect_choice:
