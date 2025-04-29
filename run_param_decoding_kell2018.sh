@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
 
-#SBATCH --mem=20Gb
+#SBATCH --mem=100Gb
 #SBATCH --time=0:30:00 # approx 6 if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
 #SBATCH -N 1
@@ -35,5 +35,5 @@ srun -K python3 -u lightning_scripts/run_param_decoding.py  \
                                    --batch_size 192 \
                                    --num_eval 5 \
                                    --num_train 50 \
-                                   --layer 'relu4' \
+                                   --layer 'relu2' \
 
