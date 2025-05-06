@@ -4,11 +4,11 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
 import numpy as np
 import matplotlib.pyplot as plt
-
+import os 
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-
+import pickle
 import logging 
 import robustness.audio_functions.audio_transforms as at
 from lightning_scripts.jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
@@ -22,6 +22,76 @@ torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+#########################################
+# Get stats for augmentation parameters 
+#########################################
+
+# def functions 
+def get_mean_of_uniform(a,b):
+    return (a+b) / 2 
+
+def get_std_of_uniform(a,b):
+    return np.sqrt(np.square(b-a) / 12.)
+
+def get_std_of_discrete_uniform(a,b):
+    return np.sqrt(np.square(b - a + 1 ) / 12.)
+
+def get_uniform_stats(a,b):
+    mean = get_mean_of_uniform(a,b)
+    std = get_std_of_uniform(a,b)
+    return mean, std
+
+def get_discrete_uniform_stats(a,b):
+    # mean is same as continuous
+    mean = get_mean_of_uniform(a,b)
+    # std is different 
+    std = get_std_of_discrete_uniform(a,b)
+    return mean, std
+
+def get_mean_of_loguniform(a,b):
+    return (b - a) / (np.log(b) - np.log(a))
+
+def get_std_of_loguniform(a,b):
+    # terms for variance 
+    log_diff = np.log(b) - np.log(a)
+    numerator = (log_diff) * (np.square(b) - np.square(a)) - (2 * np.square(b-a)) 
+    denominator = 2 * np.square(log_diff)
+    var = np.divide(numerator, denominator)
+    std = np.sqrt(var)
+    return std
+
+def get_loguniform_stats(a,b):
+    mean = get_mean_of_loguniform(a,b)
+    std = get_std_of_loguniform(a,b)
+    return mean, std
+
+# Get stats per augmentation
+snr_range = [-10, 10]
+pitch_range = [-0.5, 0.5]
+tempo_range = [-0.8, 1.2]
+
+filter_order_range = [1, 4] # is discrete choice of 1,2,3,4; can treat as discrete uniform over 1-4
+range_bandpass_freq_low = [4e1, 4e2]
+range_bandpass_freq_high = [4e3, 10e3]
+
+db_snr_mean, db_snr_std = get_uniform_stats(*snr_range)
+pitch_mean, pitch_std = get_uniform_stats(*pitch_range)
+tempo_mean, tempo_std = get_uniform_stats(*tempo_range)
+
+order_mean, order_std = get_discrete_uniform_stats(*filter_order_range)
+low_cutoff_mean, low_cutoff_std = get_loguniform_stats(*range_bandpass_freq_low)
+high_cutoff_mean, high_cutoff_std = get_loguniform_stats(*range_bandpass_freq_high)
+
+# group into array for norm 
+PARAMS_MEAN = np.array([db_snr_mean, pitch_mean, tempo_mean, order_mean, low_cutoff_mean, high_cutoff_mean],
+                           dtype=np.float32)
+PARAMS_STD = np.array([db_snr_std, pitch_std, tempo_std, order_std, low_cutoff_std, high_cutoff_std],
+                        dtype=np.float32)
+
+
+######################################
+# Define Augmentation stack object
+######################################
 
 class AudioAugmentStackWithParams(object):
     def __init__(self, low_db=-10, high_db=10):
@@ -60,6 +130,8 @@ class AudioAugmentStackWithParams(object):
 
 transforms = AudioAugmentStackWithParams()
 
+# init white noise with variance matched to desired RMS norm of signal (not necessary)
+NOISE = np.random.randn(40_000) * 0.02  
 def collate_fn(batch):
     batch = batch[0] # unbox wrapper added by dataloader 
     clean_signals = []
@@ -72,14 +144,13 @@ def collate_fn(batch):
             labels[task_key] = torch.from_numpy(task_labels)
     else:
         labels = torch.from_numpy(labels) 
-    # convert signal and noise into signal
-    for (signal, noise) in  zip(*batch[:2]):
+    # convert signal and noise into mixture
+    for (signal, _) in  zip(*batch[:2]):
         if signal.sum() == 0 or signal is None:
             continue 
-        if noise.sum() == 0: 
-            continue
         else:
-            (clean_sig, augment_sig), params_i = transforms(signal, noise)
+            # this uses the noise defined outside the collate function 
+            (clean_sig, augment_sig), params_i = transforms(signal, NOISE)
             clean_signals.append(clean_sig)
             augmented_signals.append(augment_sig)
             params.append(params_i)
@@ -173,10 +244,24 @@ def main(args):
     config_model_invariant = yaml.load(open(config_model_invariant_path, 'r'), Loader=yaml.FullLoader)
     invar_model_name = config_model_invariant_path.stem
 
-    path_model_equivariant = '/mnt/ceph/users/igriffith/projects/cochdnn/model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02/checkpoints/epoch=129-step=23400-best_train.ckpt'
-    config_model_equivariant_path = Path('/mnt/ceph/users/igriffith/projects/cochdnn/model_configs/equi_lmbda_search/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02.yaml')
+
+    if args.config_list:
+        with open(args.config_list, 'rb') as f:
+            model_config = pickle.load(f)
+            config_model_equivariant_path = Path(model_config[args.config_id])
+    else:
+        config_model_equivariant_path = Path('/mnt/ceph/users/igriffith/projects/cochdnn/model_configs/equi_lmbda_search/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02.yaml')
+   
     config_model_equivariant = yaml.load(open(config_model_equivariant_path, 'r'), Loader=yaml.FullLoader)
+    checkpoint_dir = args.exp_dir / f"{config_model_equivariant_path.stem}/checkpoints"
+    # Get latest ckpt for equivariant model 
+    path_model_equivariant = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1]
+
     equivar_model_name = config_model_equivariant_path.stem
+
+
+    print(f"Running models: {invar_model_name} and {equivar_model_name}")
+    # path_model_equivariant = '/mnt/ceph/users/igriffith/projects/cochdnn/model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02/checkpoints/epoch=129-step=23400-best_train.ckpt'
 
     kell2018_invariant = LitAudioSSL.load_from_checkpoint(config=config_model_invariant, checkpoint_path=path_model_invariant)
     all_layers = kell2018_invariant.metamer_layers
@@ -216,13 +301,8 @@ def main(args):
     Y_test = params_test.detach().cpu().numpy()
 
     ## norm parameters 
-    # compute global stats 
-    Y_global = np.vstack([Y_train, Y_test])
-    global_mean = Y_global.mean(0)
-    global_std = Y_global.std(0)
-    # norm parameters 
-    Y_train = (Y_train - global_mean) / global_std
-    Y_test  = (Y_test - global_mean) / global_std
+    Y_train = (Y_train - PARAMS_MEAN) / PARAMS_STD
+    Y_test  = (Y_test - PARAMS_MEAN) / PARAMS_STD
 
     regression_1 = LinearRegression().fit(X1_train, Y_train)
     regression_2 = LinearRegression().fit(X2_train, Y_train)
@@ -245,18 +325,22 @@ def main(args):
 
 
     print(f"Invariant Score: {score_1:.3f}, Equivariant Score: {score_2:.3f}")
-    plt.figure(figsize=(15, 5))
-    plt.bar(r2_invariant.keys(), r2_invariant.values(), color='blue', alpha=0.5, label='Invariant')
-    plt.bar(r2_equivariant.keys(), r2_equivariant.values(), color='red', alpha=0.5, label='Equivariant')
-    plt.xticks(rotation=45)
+    plt.figure(figsize=(10, 5))
+    bar_width = 0.25
+    bar_x = np.arange(len(r2_invariant.keys()))
+    plt.bar(bar_x, r2_invariant.values(), color='blue', alpha=0.5, label='Invariant', width=bar_width)
+    plt.bar(bar_x + bar_width, r2_equivariant.values(), color='red', alpha=0.5, label='Equivariant', width=bar_width)
+    plt.axhline(0, color='k', lw=0.5)
+    plt.xticks(rotation=45, ticks=bar_x + (bar_width * 0.5), labels=list(r2_invariant.keys()))
     plt.xlabel('Augmentation')
     plt.ylabel('$R^2$ Score')
-    plt.title(f"Invariant model: {invar_model_name}\n Equivariant model: {equivar_model_name}")
+    plt.ylim(-1.1,1.1)
+    plt.title(f"Invariant model: {invar_model_name}\n Equivariant model: {equivar_model_name}\nLayer: {layer}")
     plt.legend()
     fig_out_dir = Path('parameter_decoding') / f"{invar_model_name}_{equivar_model_name}"
     fig_out_dir.mkdir(parents=True, exist_ok=True)
-    fig_out_name = fig_out_dir / f"{args.layer}_param_decoding_r2_by_augmentation"
-    plt.savefig(fig_out_name, transparent=True, bbox_inches='tight' )
+    fig_out_name = fig_out_dir / f"{layer}_param_decoding_r2_by_augmentation"
+    plt.savefig(fig_out_name, transparent=False, bbox_inches='tight' )
 
 
 
@@ -298,6 +382,20 @@ if __name__ == "__main__":
         type=int,
         help="Slurm job array index, used to select layers."
     )
+    parser.add_argument(
+        "--config_id",
+        default=-1,
+        type=int,
+        help="Slurm job array index, used to select equivariant model."
+    )
+    parser.add_argument(
+        "--exp_dir",
+        default=Path("./model_checkpoints"),
+        type=Path,
+        help="Directory to save checkpoints and logs to. (Default: './exp')",
+    )
+    parser.add_argument('--config_list', type=str, help='Path to list of config files.')
+
     args = parser.parse_args()
     main(args)
 
