@@ -343,6 +343,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             target_keys=None,
             blocked_batches=True,
             signal_augment=False,
+            skip_aug_match=False,
             overfit=False,
     ):
         super().__init__()
@@ -364,7 +365,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
         if signal_augment:
-            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(sample_rate=20000)
+            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(sample_rate=20000, skip_aug_match=skip_aug_match)
 
     def class_map(self):
         """

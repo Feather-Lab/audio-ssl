@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
 #SBATCH -N 1
-#SBATCH --array=0-5 # 0-5 in manifest
+#SBATCH --array=0-6 # 0-5 in manifest; 0-6 if invar_to_augments
 
 # module purge
 # module load python
@@ -28,7 +28,13 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_list train_config_manifests/barlow_equivariant_lmbda_search_kell2018.pkl \
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_list train_config_manifests/barlow_equivariant_lmbda_search_kell2018.pkl \
+#                                    --array_id $SLURM_ARRAY_TASK_ID \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --exp_dir model_checkpoints \
+#                                   --resume_training 
+
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_list train_config_manifests/barlow_equivariant_lmbda_search_kell2018_invar_to_augments.pkl \
                                    --array_id $SLURM_ARRAY_TASK_ID \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \

@@ -831,9 +831,10 @@ class MatchedRandomSignalAugmentSox(torch.nn.Module):
     Samples whether to apply filtering, pitch shifting, or tempo change 
     augmentations to signals, and the parameters for each augmentation. 
     """
-    def __init__(self, sample_rate=20000):
+    def __init__(self, sample_rate=20000, skip_aug_match=False):
         super().__init__()
         self.sample_rate = sample_rate
+        self.skip_aug_match = skip_aug_match
     
 
     def __call__(self, signal_1, signal_2, speech=True, print_augments=False):
@@ -842,6 +843,11 @@ class MatchedRandomSignalAugmentSox(torch.nn.Module):
         if print_augments:
             print(aug_dict)
         signal_1 = augment_excerpt(signal_1, aug_dict, sr=self.sample_rate)
+        
+        if self.skip_aug_match:
+            # resample augmentations 
+            aug_dict = sample_augments(speech=speech)
+
         signal_2 = augment_excerpt(signal_2, aug_dict, sr=self.sample_rate)
 
         return signal_1, signal_2

@@ -5,13 +5,10 @@
 #SBATCH --mem=8Gb
 #SBATCH --cpus-per-task=1
 #SBATCH --time=3:00:00
-#SBATCH --partition=gpu
-#SBATCH -N 1
-#SBATCH --gpus=1
+#SBATCH --partition=genx
 
-module load slurm gcc python3
 
 mamba activate cochdnn_ssl_pl
 
-export LC_ALL=C; unset XDG_RUNTIME_DIR && jupyter lab --no-browser --ip='0.0.0.0' --port=1338
+export LC_ALL=C; unset XDG_RUNTIME_DIR && jupyter lab --no-browser --ip='0.0.0.0' --port=1337
 
