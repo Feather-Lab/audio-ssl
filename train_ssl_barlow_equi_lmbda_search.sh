@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
 #SBATCH -N 1
-#SBATCH --array=0-6 # 0-5 in manifest; 0-6 if invar_to_augments
+#SBATCH --array=0,5 # 0-5 in manifest; 0-6 if invar_to_augments
 
 # module purge
 # module load python

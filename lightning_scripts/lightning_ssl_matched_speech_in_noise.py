@@ -337,6 +337,7 @@ class LitAudioSSL(L.LightningModule):
                                                      target_keys=self.config['data'].get("target_keys", None),
                                                      blocked_batches=self.config['data'].get("blocked_batches", False),
                                                      signal_augment=self.config['data'].get("signal_augment", False),
+                                                     skip_aug_match=self.config['data'].get("skip_aug_match", False),
                                                      )
         
         train_dataloader = torch.utils.data.DataLoader(
@@ -359,6 +360,7 @@ class LitAudioSSL(L.LightningModule):
                                                      db_spl=self.config['audio_transforms']['dbspl'],
                                                      batch_size=self.config['hparas']['batch_size'],
                                                      signal_augment=self.config['data'].get("signal_augment", False),
+                                                     skip_aug_match=self.config['data'].get("skip_aug_match", False),
                                                      target_keys=self.config['data'].get("target_keys", None),
                                                      )
         dataloader = torch.utils.data.DataLoader(

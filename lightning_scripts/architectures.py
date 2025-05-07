@@ -79,6 +79,9 @@ class SSLBaseModelSingleTask(nn.Module):
                 self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
                 # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
                 self.ssl_rep_name = 'layer4'
+            if "no_avgpool" in kwargs:
+                self.f.avgpool = nn.Flatten()
+                proj_out_dim = 46592
 
         elif 'kell' in backbone:
             self.f.dropout = nn.Identity()

@@ -802,9 +802,10 @@ class MatchedRandomSignalCrops(torch.nn.Module):
     Randomly crops two signals to the same length, such that the word is in the same
     position (as defined by the center of the word) in both signals.
     """
-    def __init__(self, crop_length=40000):
+    def __init__(self, crop_length=40000, matched=True):
         super().__init__()
         self.crop_length = crop_length
+        self.matched = matched
 
     def __call__(self, signal_1, signal_2):
         # assumes signal_1 is shorter than signal_2 (so crop_idx_1 is valid for signal_2)
@@ -819,7 +820,10 @@ class MatchedRandomSignalCrops(torch.nn.Module):
             return cropped_1, None
 
         # crop second signal so that the word is in the same start position
-        start_idx_2 = start_idx_1 + (len(signal_2) - len(signal_1)) // 2
+        if not self.matched:
+            start_idx_2 = np.random.randint(signal_2.shape[0] - self.crop_length)
+        else:
+            start_idx_2 = start_idx_1 + (len(signal_2) - len(signal_1)) // 2
         cropped_2 = signal_2[start_idx_2:start_idx_2+self.crop_length]
 
         return cropped_1, cropped_2
