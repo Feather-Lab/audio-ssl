@@ -52,6 +52,7 @@ class SSLClassifier(L.LightningModule):
         # softcode size dict at some point 
         self.time_avg_rep = config['model']['arch_kwargs'].get('time_average', True)
         self.crop_audio = config.get('crop_audio', False)
+        self.no_avgpool = config['model']['arch_kwargs'].get('no_avgpool', False)
         if self.crop_audio:
             self.audio_crop = at.CenterCropForegroundBackground(signal_size=40_000, crop_length=20_000) # random crop to 1 second, centered on word
 
@@ -108,30 +109,32 @@ class SSLClassifier(L.LightningModule):
                                     'relufc': 4096}
             
         elif config['model']['arch_kwargs']['backbone'] in ['resnet18', 'resnet_multi_task18']:
-                if self.time_avg_rep:
-                    layer_size_dict = {'input_after_preproc': 211,
-                                        'conv1': 6784,
-                                        'bn1': 6784,
-                                        'conv1_relu1': 6784,
-                                        'maxpool1': 3392,
-                                        'layer1': 3392,
-                                        'layer2': 3456,
-                                        'layer3': 3584,
-                                        'layer4': 3584,
-                                        'avgpool': 512,
-                                        'final': 512}
-                else:
-                    layer_size_dict = {'input_after_preproc': 82290,
-                                        'conv1': 1322880,
-                                        'bn1': 1322880,
-                                        'conv1_relu1': 1322880,
-                                        'maxpool1': 332416,
-                                        'layer1': 332416,
-                                        'layer2': 169344,
-                                        'layer3': 89600,
-                                        'layer4': 46592,
-                                        'avgpool': 512,
-                                        'final': 512}
+            if self.time_avg_rep:
+                layer_size_dict = {'input_after_preproc': 211,
+                                    'conv1': 6784,
+                                    'bn1': 6784,
+                                    'conv1_relu1': 6784,
+                                    'maxpool1': 3392,
+                                    'layer1': 3392,
+                                    'layer2': 3456,
+                                    'layer3': 3584,
+                                    'layer4': 3584,
+                                    'avgpool': 512,
+                                    'final': 512}
+            else:
+                layer_size_dict = {'input_after_preproc': 82290,
+                                    'conv1': 1322880,
+                                    'bn1': 1322880,
+                                    'conv1_relu1': 1322880,
+                                    'maxpool1': 332416,
+                                    'layer1': 332416,
+                                    'layer2': 169344,
+                                    'layer3': 89600,
+                                    'layer4': 46592,
+                                    'avgpool': 512,
+                                    'final': 512}
+            if self.no_avgpool:
+                layer_size_dict['avgpool'] = layer_size_dict['layer4']
         else:
             # TODO - get shapes for resnet50 
             layer_size_dict = {'input_after_preproc': 211,
@@ -676,7 +679,7 @@ def cli_main(args):
     config['with_noise'] = args.with_noise
     # don't load in classifier head if it exists 
     config['hparas']['lr'] = args.lr 
-    config['hparas']['epochs'] = 3
+    config['hparas']['epochs'] = args.train_epochs
     if 'arch_kwargs' not in config['model'].keys():
         config['model']['arch_kwargs'] = {}
     config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
@@ -935,6 +938,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr_scheduler', action=BooleanOptionalAction, help='Use lr scheduler?')
     parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
+    parser.add_argument('--train_epochs', default=3, type=int, help='Number of training epochs.')
     args = parser.parse_args()
 
     cli_main(args)

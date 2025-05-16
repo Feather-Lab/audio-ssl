@@ -81,7 +81,7 @@ class SSLBaseModelSingleTask(nn.Module):
                 self.ssl_rep_name = 'layer4'
             if "no_avgpool" in kwargs:
                 self.f.avgpool = nn.Flatten()
-                proj_out_dim = 46592
+                proj_out_dim = 46592 if 'resnet18' in backbone else 78336
 
         elif 'kell' in backbone:
             self.f.dropout = nn.Identity()
@@ -127,10 +127,11 @@ class SSLBaseModelSingleTask(nn.Module):
         
 
 class SSLBaseModelDualTask(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, **kwargs):
         super().__init__()
         self.supervised = supervised
         self.backbone = backbone
+        self.frame_wise_loss = frame_wise_loss
         self.f = robustness_architectures.__dict__[backbone]()
 
         if 'resnet' in backbone:
@@ -143,6 +144,9 @@ class SSLBaseModelDualTask(nn.Module):
                 self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
                 # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
                 self.ssl_rep_name = 'layer4'
+            if "no_avgpool" in kwargs:
+                self.f.avgpool = nn.Flatten()
+                proj_out_dim = 46592 if 'resnet18' in backbone else 78336
 
         elif 'kell' in backbone:
             self.f.dropout = nn.Identity()
