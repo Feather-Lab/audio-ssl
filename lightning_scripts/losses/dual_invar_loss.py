@@ -48,9 +48,9 @@ class Paired_Loss(nn.Module):
         z2_inv = torch.cat([z12_inv, z22_inv], dim=0)
         inv_loss = self.loss_fn_inv(z1_inv, z2_inv)
 
-        # equivariant loss
-        z1_eq = z12_equi - z11_equi
-        z2_eq = z22_equi - z21_equi
+        # alt invariant loss
+        z1_eq = torch.cat([z11_equi, z12_equi], dim=0)
+        z2_eq = torch.cat([z21_equi, z22_equi], dim=0)
         eq_loss = self.loss_fn_eq(z1_eq, z2_eq)
 
         loss = (1 - self.lmda) * inv_loss + self.lmda * eq_loss
