@@ -175,6 +175,10 @@ class SSLClassifier(L.LightningModule):
             self.classifier = nn.ModuleDict(all_fc_layers)
         else:
             self.classifier = nn.Linear(proj_out_dim, num_classes)
+        if config['model'].get('with_dropout', False):
+            self.dropout = nn.Dropout(p=0.5) # TODO: softcode p
+        else:
+            self.dropout = False 
 
         self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
                                                       batch_size=None,
@@ -194,6 +198,8 @@ class SSLClassifier(L.LightningModule):
                 activations = activations.view(activations.shape[0], -1)
                 # time average then flatten
             activations = activations.detach()
+        if self.dropout:
+            activations = self.dropout(activations)
         if self.mlp:
             activations = self.mlp(activations)
         if isinstance(self.classifier, nn.ModuleDict): 
@@ -722,6 +728,13 @@ def cli_main(args):
         mlp_str = "_w_mlp"
     else:
         mlp_str = ""
+    
+    if args.with_dropout:
+        config['model']['with_dropout'] = True
+        dropout_str = "_w_dropout"
+    else:
+        dropout_str = ""
+
 
     # get checkpoint for ssl model 
     checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
@@ -737,7 +750,7 @@ def cli_main(args):
         ckpt_modifier = '_from_best_val_ckpt'
     
     w_noise_modifier = '_with_noise' if args.with_noise else ""
-    str_modifier = f"{task_str}_{args.layer_str}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}"
+    str_modifier = f"{task_str}_{args.layer_str}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}{dropout_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
     if use_byola:
@@ -929,6 +942,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
     parser.add_argument('--w_mlp', action=BooleanOptionalAction, help='Use MLP instead of linear classifier?')
     parser.add_argument('--with_noise', action=BooleanOptionalAction, help='Include noise in training?')
+    parser.add_argument('--with_dropout', action=BooleanOptionalAction, help='Include dropout layer in classifier?')
     parser.add_argument('--overwrite_classifier', action=BooleanOptionalAction, help='Overwrite existing classifer?')
     parser.add_argument('--eval_only', action=BooleanOptionalAction, help='Eval using existing classifer?')
     parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
