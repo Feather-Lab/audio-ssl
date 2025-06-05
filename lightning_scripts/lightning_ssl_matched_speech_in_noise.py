@@ -5,6 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import lightning as L
 import os, sys
+import logging
 
 sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
@@ -110,6 +111,8 @@ class LitAudioSSL(L.LightningModule):
         self.init_train_log = True 
 
     def _step(self, batch, batch_idx, step_type):
+        if batch_idx == 0:
+            logging.getLogger('sox').setLevel(logging.ERROR)
         if self.opt_supervised_task: 
             [spec_11, spec_12, spec_21, spec_22], [labels_11, labels_12, labels_21, labels_22] = batch
         else:
@@ -290,7 +293,6 @@ class LitAudioSSL(L.LightningModule):
 
     def  on_validation_epoch_start(self):
         if  self.init_train_log:
-            print("This is the first step after restoring from a checkpoint!")
             ### Hack to log train_total_loss when resuming from checkpoint 
             self.log(f"train_total_loss", 100.0, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
             self.init_train_log = False 

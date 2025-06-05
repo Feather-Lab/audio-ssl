@@ -25,38 +25,33 @@ val_metric_mode: 'max'
 
 hparas:
   epochs: 250
-  global_batch_size: 512
+  global_batch_size: 512 #320
   lambda_ssl: 1
   lr: 0.2
   num_warmup_steps_or_ratio: 0.1
   optimizer: LARS
-  ssl_loss: Paired_Loss
+  ssl_task: 'word'                            # either 'word', 'audioset', 'dual'
+  ssl_loss_str: 'barlow'
+  ssl_loss: 'Barlow_Loss'
   ssl_loss_kwargs:
-    lmda: 0.5
-    loss_fn_eq: Barlow_Loss
-    loss_fn_eq_kwargs:
-      lmbda: 0.01
-      out_dim: 512
-    loss_fn_inv: Barlow_Loss
-    loss_fn_inv_kwargs:
-      lmbda: 0.01
-      out_dim: 512
-  ssl_loss_str: paired
-  ssl_task: dual
-  task_loss_params:
-    noise/labels_int:
-      loss_type: bcewithlogitsloss
-      weight: 1.0
-    signal/speaker_int:
-      loss_type: crossentropyloss
-      weight: 1.0
-    signal/word_int:
-      loss_type: crossentropyloss
-      weight: 1.0
+    lmbda: 0.005
+    out_dim: 512
+
   valid_step: 5000
+  task_loss_params:
+    signal/word_int:
+      loss_type: 'crossentropyloss'
+      weight: 1.0                         # init loss is ~6.6 
+    noise/labels_int:
+      loss_type: 'bcewithlogitsloss'
+      weight: 1.0                      # init loss is ~200 
+    signal/speaker_int:
+      loss_type: 'crossentropyloss'
+      weight: 1.0 
+
 
 model:
-  arch_name: "SSLBaseModelDualTask"
+  arch_name: "SSLBaseModelSingleTask"
   arch_kwargs:
     backbone: 'resnet18'
     no_avgpool: True

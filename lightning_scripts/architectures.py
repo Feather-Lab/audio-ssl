@@ -79,7 +79,7 @@ class SSLBaseModelSingleTask(nn.Module):
                 self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
                 # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
                 self.ssl_rep_name = 'layer4'
-            if "no_avgpool" in kwargs:
+            if kwargs.get("no_avgpool", False):
                 self.f.avgpool = nn.Flatten()
                 proj_out_dim = 46592 if 'resnet18' in backbone else 78336
 

@@ -35,11 +35,11 @@ hparas:
     lmda: 0.5
     loss_fn_eq: Barlow_Loss
     loss_fn_eq_kwargs:
-      lmbda: 0.01
+      lmbda: 0.005
       out_dim: 512
     loss_fn_inv: Barlow_Loss
     loss_fn_inv_kwargs:
-      lmbda: 0.01
+      lmbda: 0.005
       out_dim: 512
   ssl_loss_str: paired
   ssl_task: dual

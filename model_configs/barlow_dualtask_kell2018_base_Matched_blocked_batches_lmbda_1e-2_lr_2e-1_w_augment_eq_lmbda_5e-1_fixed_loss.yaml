@@ -14,7 +14,6 @@ data:
   target_keys: ['signal/word_int', 'signal/speaker_int', 'noise/labels_int']
   blocked_batches: True
   signal_augment: True
-  skip_aug_match: True
 
 
 val_metric:
@@ -25,44 +24,44 @@ val_metric_mode: 'max'
 
 hparas:
   epochs: 250
-  global_batch_size: 512
+  global_batch_size: 640 #320
   lambda_ssl: 1
   lr: 0.2
   num_warmup_steps_or_ratio: 0.1
   optimizer: LARS
-  ssl_loss: Paired_Loss
+  ssl_task: dual
+  ssl_loss: "Paired_Loss"
+  ssl_loss_str: "paired"
   ssl_loss_kwargs:
-    lmda: 0.5
-    loss_fn_eq: Barlow_Loss
-    loss_fn_eq_kwargs:
-      lmbda: 0.01
-      out_dim: 512
-    loss_fn_inv: Barlow_Loss
+    loss_fn_inv: "Barlow_Loss"
+    loss_fn_eq: "Barlow_Loss"
     loss_fn_inv_kwargs:
       lmbda: 0.01
       out_dim: 512
-  ssl_loss_str: paired
-  ssl_task: dual
-  task_loss_params:
-    noise/labels_int:
-      loss_type: bcewithlogitsloss
-      weight: 1.0
-    signal/speaker_int:
-      loss_type: crossentropyloss
-      weight: 1.0
-    signal/word_int:
-      loss_type: crossentropyloss
-      weight: 1.0
+    loss_fn_eq_kwargs:
+      lmbda: 0.01
+      out_dim: 512
+    lmda: 0.5                         # is weight for equivariant loss
   valid_step: 5000
+  task_loss_params:
+    signal/word_int:
+      loss_type: 'crossentropyloss'
+      weight: 1.0                         # init loss is ~6.6 
+    noise/labels_int:
+      loss_type: 'bcewithlogitsloss'
+      weight: 1.0                      # init loss is ~200 
+    signal/speaker_int:
+      loss_type: 'crossentropyloss'
+      weight: 1.0 
+
 
 model:
   arch_name: "SSLBaseModelDualTask"
   arch_kwargs:
-    backbone: 'resnet18'
-    no_avgpool: True
+    backbone: 'kell2018'
     in_channels: 1
-    proj_out_dim: 46592                  # No average pooling in resnet
     projector_dims: [512, 512]
+    proj_out_dim: 4096
     num_classes:
       signal/word_int: 794               # TODO: -1 from this if not using null
       signal/speaker_int: 433            # TODO: -1 from this if not using null

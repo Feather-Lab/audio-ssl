@@ -239,9 +239,17 @@ def main(args):
             )
 
     # Model Loading
-    path_model_invariant = '/mnt/ceph/users/igriffith/projects/cochdnn/model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=205-step=37080-best_speaker_task.ckpt'
-    config_model_invariant_path = Path('model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml')
+    config_model_invariant_path = Path(args.invar_model_config) # Path('model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml')
     config_model_invariant = yaml.load(open(config_model_invariant_path, 'r'), Loader=yaml.FullLoader)
+
+    if args.invar_model_ckpt == '':
+        checkpoint_dir = Path(args.exp_dir) / f"{config_model_invariant_path.stem}/checkpoints"
+        # Get latest ckpt for equivariant model 
+        path_model_invariant = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1]
+    else:
+        path_model_invariant = args.invar_model_ckpt  
+    print('Invariant checkpoint path: ', path_model_invariant)
+
     invar_model_name = config_model_invariant_path.stem
 
 
@@ -250,38 +258,42 @@ def main(args):
             model_config = pickle.load(f)
             config_model_equivariant_path = Path(model_config[args.config_id])
     else:
-        config_model_equivariant_path = Path('/mnt/ceph/users/igriffith/projects/cochdnn/model_configs/equi_lmbda_search/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02.yaml')
+        config_model_equivariant_path = Path(args.equi_model_config)
    
     config_model_equivariant = yaml.load(open(config_model_equivariant_path, 'r'), Loader=yaml.FullLoader)
-    checkpoint_dir = args.exp_dir / f"{config_model_equivariant_path.stem}/checkpoints"
-    # Get latest ckpt for equivariant model 
-    path_model_equivariant = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1]
+
+    if args.equi_model_ckpt == '':
+        checkpoint_dir = Path(args.exp_dir) / f"{config_model_equivariant_path.stem}/checkpoints"
+        # Get latest ckpt for equivariant model 
+        path_model_equivariant = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1]
+    else:
+        path_model_equivariant = args.equi_model_ckpt  
+    print('Equivariant checkpoint path: ', path_model_equivariant)
 
     equivar_model_name = config_model_equivariant_path.stem
 
 
     print(f"Running models: {invar_model_name} and {equivar_model_name}")
-    # path_model_equivariant = '/mnt/ceph/users/igriffith/projects/cochdnn/model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-02/checkpoints/epoch=129-step=23400-best_train.ckpt'
 
-    kell2018_invariant = LitAudioSSL.load_from_checkpoint(config=config_model_invariant, checkpoint_path=path_model_invariant)
-    all_layers = kell2018_invariant.metamer_layers
-    kell2018_invariant = kell2018_invariant.model.eval().cuda()
-    kell2018_equivariant = LitAudioSSL.load_from_checkpoint(config=config_model_equivariant, checkpoint_path=path_model_equivariant).model.eval().cuda()
+    invariant_model = LitAudioSSL.load_from_checkpoint(config=config_model_invariant, checkpoint_path=path_model_invariant)
+    all_layers = invariant_model.metamer_layers
+    invariant_model = invariant_model.model.eval().cuda()
+    equivariant_model = LitAudioSSL.load_from_checkpoint(config=config_model_equivariant, checkpoint_path=path_model_equivariant).model.eval().cuda()
 
     layer = all_layers[args.job_id] if args.job_id > -1 else args.layer
 
     # Extract Features
     rc_test_1, ra_test_1, rc_test_2, ra_test_2, params_test, labels_test = extract_features_param_decoding(
-        kell2018_invariant, 
-        kell2018_equivariant, 
+        invariant_model, 
+        equivariant_model, 
         test_loader,
         num_batches=args.num_eval,
         layer=layer
 
     )
     rc_train_1, ra_train_1, rc_train_2, ra_train_2, params_train, labels_train = extract_features_param_decoding(
-        kell2018_invariant, 
-        kell2018_equivariant, 
+        invariant_model, 
+        equivariant_model, 
         train_loader,
         num_batches=args.num_train,
         layer=layer
@@ -393,6 +405,30 @@ if __name__ == "__main__":
         default=Path("./model_checkpoints"),
         type=Path,
         help="Directory to save checkpoints and logs to. (Default: './exp')",
+    )
+    parser.add_argument(
+        "--invar_model_config",
+        default=Path("model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml"),
+        type=Path,
+        help="Path to invariant model config",
+    )
+    parser.add_argument(
+        "--invar_model_ckpt",
+        default='', # Path("model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=205-step=37080-best_speaker_task.ckpt"),
+        type=str,
+        help="Path to invariant model checkpoint",
+    )
+    parser.add_argument(
+        "--equi_model_config",
+        default=Path("model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1_fixed_loss.yaml"),
+        type=Path,
+        help="Path to equivariant model config",
+    )
+    parser.add_argument(
+        "--equi_model_ckpt",
+        default='', # Path("model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=205-step=37080-best_speaker_task.ckpt"),
+        type=str,
+        help="Path to equivariant model checkpoint",
     )
     parser.add_argument('--config_list', type=str, help='Path to list of config files.')
 

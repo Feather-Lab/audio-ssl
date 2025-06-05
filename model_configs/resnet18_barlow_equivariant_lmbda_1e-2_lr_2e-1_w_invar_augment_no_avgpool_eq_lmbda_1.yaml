@@ -32,7 +32,7 @@ hparas:
   optimizer: LARS
   ssl_loss: Paired_Loss
   ssl_loss_kwargs:
-    lmda: 0.5
+    lmda: 1
     loss_fn_eq: Barlow_Loss
     loss_fn_eq_kwargs:
       lmbda: 0.01

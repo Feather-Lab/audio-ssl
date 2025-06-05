@@ -35,6 +35,6 @@ srun -K python3 -u lightning_scripts/run_param_decoding.py  \
                                    --batch_size 192 \
                                    --num_eval 5 \
                                    --num_train 10 \
-                                   --layer 'relufc' \
-                                   --invar_model_config model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-                                   --equi_model_config model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1_fixed_loss.yaml \
+                                   --layer 'avgpool' \
+                                   --invar_model_config model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml \
+                                   --equi_model_config model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_5e-01.yaml \
