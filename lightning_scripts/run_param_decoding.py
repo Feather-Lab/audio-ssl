@@ -333,8 +333,7 @@ def main(args):
     r2_invariant, r2_equivariant = {}, {}
     for _ in range(len(AUGMENTATION_LIST)):
         r2_invariant[AUGMENTATION_LIST[_]] =  r2_score(Y_test[:, _], preds_1[:, _])
-        r2_equivariant[AUGMENTATION_LIST[_]] =  r2_score(Y_test[:, _], preds_2[:, _])
-
+        r2_equivariant[AUGMENTATION_LIST[_]] =  r2_score(Y_test[:, _], preds_2[:, _])    
 
     print(f"Invariant Score: {score_1:.3f}, Equivariant Score: {score_2:.3f}")
     plt.figure(figsize=(10, 5))
@@ -353,6 +352,13 @@ def main(args):
     fig_out_dir.mkdir(parents=True, exist_ok=True)
     fig_out_name = fig_out_dir / f"{layer}_param_decoding_r2_by_augmentation"
     plt.savefig(fig_out_name, transparent=False, bbox_inches='tight' )
+
+    # save results 
+    data_out_name = fig_out_dir / f"{layer}_r2_decoding_values.pkl"
+    data = dict(r2_invariant=r2_invariant, r2_equivariant=r2_equivariant)
+
+    with open(data_out_name, 'wb') as handle:
+        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 

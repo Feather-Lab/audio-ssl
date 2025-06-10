@@ -767,14 +767,14 @@ def cli_main(args):
     classifier_ckpt = None 
 
     if len(classifier_ckpts) > 0 and args.use_classifier_ckpt:
-        classifier_ckpt_path = sorted(classifier_ckpts, key=os.path.getctime)[-1]
-        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
+        classifier_ckpt_path = str(sorted(classifier_ckpts, key=os.path.getctime)[-1])
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=False) # get latest checkpoint 
         module.load_state_dict(classifier_ckpt['state_dict'])
         print(f"Loaded classifier from {classifier_ckpt_path}")
     
     if args.classifier_ckpt_path != '':
-        classifier_ckpt_path = args.classifier_ckpt_path
-        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
+        classifier_ckpt_path = str(args.classifier_ckpt_path)
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=False) # get latest checkpoint 
         module.load_state_dict(classifier_ckpt['state_dict'])
         print(f"Loaded classifier from {classifier_ckpt_path}")
         
