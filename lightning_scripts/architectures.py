@@ -61,9 +61,10 @@ class SSLBaseModel(nn.Module):
 
 
 class SSLBaseModelSingleTask(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, supervised_dropout=False, **kwargs):
         super().__init__()
         self.supervised = supervised
+        self.supervised_dropout = supervised_dropout
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
 
@@ -92,6 +93,9 @@ class SSLBaseModelSingleTask(nn.Module):
         ## Assumes same dims for inv and equi tasks 
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv = ProjectionHead(projector_dims)
+
+        if supervised_dropout:
+            self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
             if isinstance(num_classes, dict): # Make multiple fully conected layers
                 all_fc_layers = {}
@@ -117,19 +121,23 @@ class SSLBaseModelSingleTask(nn.Module):
         if not self.supervised:
             return feature, inv_out, None 
         else:
+            feature = feature.detach()
+            if self.supervised_dropout:
+                feature = self.lin_cls_dropout(feature)
             if isinstance(self.lin_cls, nn.ModuleDict): 
                 logits = {}
                 for task, fc_l in self.lin_cls.items():
-                    logits[task] = fc_l(feature.detach())
+                    logits[task] = fc_l(feature)
             else:
-                logits = self.lin_cls(feature.detach())
+                logits = self.lin_cls(feature)
         return feature, inv_out, logits
         
 
 class SSLBaseModelDualTask(nn.Module):
-    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, **kwargs):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, supervised_dropout=False, **kwargs):
         super().__init__()
         self.supervised = supervised
+        self.supervised_dropout = supervised_dropout
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
         self.f = robustness_architectures.__dict__[backbone]()
@@ -156,6 +164,8 @@ class SSLBaseModelDualTask(nn.Module):
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv = ProjectionHead(projector_dims)
         self.g_equi = ProjectionHead(projector_dims)
+        if supervised_dropout:
+            self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
             if isinstance(num_classes, dict): # Make multiple fully conected layers
                 all_fc_layers = {}
@@ -173,12 +183,15 @@ class SSLBaseModelDualTask(nn.Module):
         if not self.supervised:
             return feature, (inv_out, equi_out), None 
         else:
+            feature = feature.detach()
+            if self.supervised_dropout:
+                feature = self.lin_cls_dropout(feature)
             if isinstance(self.lin_cls, nn.ModuleDict): 
                 logits = {}
                 for task, fc_l in self.lin_cls.items():
-                    logits[task] = fc_l(feature.detach())
+                    logits[task] = fc_l(feature)
             else:
-                logits = self.lin_cls(feature.detach())
+                logits = self.lin_cls(feature)
         return feature, (inv_out, equi_out), logits
 
 

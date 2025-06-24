@@ -782,19 +782,26 @@ class MatchedCombineWithRandomDBSNR(torch.nn.Module):
     """
     Combines two signals at the same random dB SNR level.
     """
-    def __init__(self, low_db=-10, high_db=10, return_param: bool=False):
+    def __init__(self, low_db=-10, high_db=10, return_param: bool=False, skip_aug_match: bool=False):
         super().__init__()
         self.low_db = low_db
         self.high_db = high_db
         self.return_param = return_param
         self.combiner_random = CombineWithRandomDBSNRWithParam(low_db, high_db)
         self.combiner_fixed = CombineWithFixedDBSNR()
-    
+        self.skip_aug_match = skip_aug_match
+
     def __call__(self, foreground_wav1, foreground_wav2, background_wav1, background_wav2):
         combined_1, rand_db_snr = self.combiner_random(foreground_wav1, background_wav1)
-        combined_2 =  self.combiner_fixed(foreground_wav2, background_wav2, rand_db_snr)
+        if self.skip_aug_match:
+            combined_2, rand_db_snr_2 = self.combiner_random(foreground_wav2, background_wav2)
+        else:
+            combined_2 =  self.combiner_fixed(foreground_wav2, background_wav2, rand_db_snr)
         if self.return_param:
-            return combined_1, combined_2, float(rand_db_snr)
+            if self.skip_aug_match:
+                return combined_1, combined_2, (float(rand_db_snr), float(rand_db_snr_2)) 
+            else:
+                return combined_1, combined_2, float(rand_db_snr)
         return combined_1, combined_2
 
 class MatchedRandomSignalCrops(torch.nn.Module):
@@ -802,10 +809,10 @@ class MatchedRandomSignalCrops(torch.nn.Module):
     Randomly crops two signals to the same length, such that the word is in the same
     position (as defined by the center of the word) in both signals.
     """
-    def __init__(self, crop_length=40000, matched=True):
+    def __init__(self, crop_length=40000, skip_aug_match=False):
         super().__init__()
         self.crop_length = crop_length
-        self.matched = matched
+        self.skip_aug_match = skip_aug_match
 
     def __call__(self, signal_1, signal_2):
         # assumes signal_1 is shorter than signal_2 (so crop_idx_1 is valid for signal_2)
@@ -820,7 +827,7 @@ class MatchedRandomSignalCrops(torch.nn.Module):
             return cropped_1, None
 
         # crop second signal so that the word is in the same start position
-        if not self.matched:
+        if self.skip_aug_match:
             start_idx_2 = np.random.randint(signal_2.shape[0] - self.crop_length)
         else:
             start_idx_2 = start_idx_1 + (len(signal_2) - len(signal_1)) // 2

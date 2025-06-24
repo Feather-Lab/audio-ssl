@@ -9,7 +9,7 @@
 #SBATCH --time=5:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-20 #0-19 for kell
+#SBATCH --array=0-10 #0-19 for kell
 
 # module load cuda cudnn nccl
 
@@ -25,14 +25,14 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
 #                                    --model_ckpt_dir model_checkpoints \
 
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_5e-1_fixed_loss.yaml \
-                                   -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-                                   --model_ckpt_dir model_checkpoints \
+# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_5e-1_fixed_loss.yaml \
+#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+#                                    --model_ckpt_dir model_checkpoints \
 
 # python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml \
 #                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
 #                                    --model_ckpt_dir model_checkpoints \
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_1e-02.yaml \
-#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_no_avgpool_eq_lmbda_3e-01.yaml \
+                                   -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+                                   --model_ckpt_dir model_checkpoints \

@@ -1,7 +1,7 @@
 #!/bin/bash -l
 #SBATCH --job-name=measure_165_natsound_acts
-#SBATCH --output=outLogs/measure_165_natsound_acts_%A_%a.out
-#SBATCH --error=outLogs/measure_165_natsound_acts_%A_%a.err
+#SBATCH --output=outLogs/measure_165_natsound_acts_%j.err # %A_%a.out
+#SBATCH --error=outLogs/measure_165_natsound_acts_%j.err # %A_%a.err
 #SBATCH --cpus-per-gpu=2
 #SBATCH --gpus=1
 
@@ -9,7 +9,7 @@
 #SBATCH --time=00:10:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-5 # 0-5 in equivariant manifest
+##SBATCH --array=0-5 # 0-5 in equivariant manifest
 
 module load cuda cudnn nccl
 
@@ -25,9 +25,11 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml  \
 #                                    --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml  \
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml  \
+#                                    --dir_name_modifier "latest_ckpt"
+
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_1e-02.yaml \
                                    --dir_name_modifier "latest_ckpt"
-                                #    --ckpt_path model_checkpoints/word_kell2018_MatchedDataset_LARS/checkpoints/epoch=98-step=59400-best_word_task.ckpt \
 
 
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1.yaml  \

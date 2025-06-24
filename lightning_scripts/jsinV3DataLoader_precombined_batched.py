@@ -361,7 +361,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.blocked_batches = blocked_batches
         self.signal_augment = signal_augment
         self.random_crop = audio_transforms.RandomCrop(40000)
-        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000, matched=skip_aug_match)
+        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000, skip_aug_match=skip_aug_match)
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
         if signal_augment:

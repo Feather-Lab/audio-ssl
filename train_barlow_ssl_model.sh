@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=16
 
 #SBATCH --mem=1000Gb
-#SBATCH --time=12:00:00
+#SBATCH --time=24:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
@@ -34,7 +34,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --resume_training 
 
 # # 
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_1.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_no_avgpool_eq_lmbda_3e-01.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 
