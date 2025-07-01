@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
-#SBATCH --array=5,9 # -9 # 1-5 0-5 in manifest
+#SBATCH --array=0,4-8 # -9 # 1-5 0-5 in manifest
 
 module load cuda cudnn nccl
 mamba activate cochdnn_ssl_pl
@@ -36,6 +36,6 @@ srun -K python3 -u lightning_scripts/run_param_decoding_sep_db_and_filter.py  \
                                    --num_train 100 \
                                    --job_id $SLURM_ARRAY_TASK_ID \
                                    --invar_model_config model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml \
-                                   --equi_model_config model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_3e-01.yaml \
-                                 #   --equi_model_config model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_no_avgpool_eq_lmbda_3e-01.yaml \
+                                   --equi_model_config model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_no_avgpool_eq_lmbda_5e-01.yaml \
+                                  #  --equi_model_config model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_5e-01.yaml \
                                 #    --layer 'avgpool' \

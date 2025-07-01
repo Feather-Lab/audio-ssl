@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=32Gb ## Just 32 if evaling 
-#SBATCH --time=7:00:00 # approx 6 if training classifier from scratch. 10 min if just evaling
+#SBATCH --time=0:10:00 # approx 6 if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
@@ -41,7 +41,7 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                    --optimizer "AdamW" --lr 0.00001 \
                                    --task 'word' \
                                    --train_epochs 6 \
-                                   --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout --crop_audio
+                                   --no-with_noise --eval_only --no-lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1_fixed_loss.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \

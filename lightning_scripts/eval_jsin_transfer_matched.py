@@ -63,6 +63,15 @@ class SSLClassifier(L.LightningModule):
                 at.DBSPLNormalizeForegroundAndBackground(dbspl=60),
                 at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
             ])
+
+        self.test_transforms = at.AudioCompose([
+                at.AudioToTensor(),
+                at.CenterCropForegroundBackground(signal_size=40_000, crop_length=40_000),
+                at.CombineWithRandomDBSNR(low_snr=-10,
+                                        high_snr=10),
+                at.DBSPLNormalizeForegroundAndBackground(dbspl=60),
+                at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
+            ])
         
         if config['model']['arch_kwargs']['backbone'] == 'kell2018':
             if self.time_avg_rep:
@@ -241,9 +250,13 @@ class SSLClassifier(L.LightningModule):
         accuracy_dict = {}
         top5_dict = {}
         for task, task_loss in task_loss_dict.items():
-            task_acc = self.accuracy[task](logits[task], labels[task])
+            # filter examples with null label
+            task_IXS = (labels[task] != 0 ).nonzero(as_tuple=True)
+            task_logits = logits[task][task_IXS]
+            task_labels =  labels[task][task_IXS]
+            task_acc = self.accuracy[task](task_logits, task_labels)
             accuracy_dict[task] = task_acc
-            task_top5 = torch.isin(torch.topk(logits[task].softmax(-1), k=5, dim=-1).indices, labels[task]).any(-1).float().mean()
+            task_top5 = torch.isin(torch.topk(task_logits.softmax(-1), k=5, dim=-1).indices, task_labels).any(-1).float().mean()
             top5_dict[task] = task_top5
         return {"top1":accuracy_dict, "top5":top5_dict}
 
@@ -328,7 +341,7 @@ class SSLClassifier(L.LightningModule):
         # Only fit on clean targets 
         for (signal, noise) in  zip(*batch[:2]):
             # use transforms pre-defined in feature_extractor - None instead of noise to skip
-            signal, _ = self.transforms(signal, None)
+            signal, _ = self.test_transforms(signal, None)
             if signal is None:
                 # Signal was none & has null label class 
                 signal = torch.zeros(1,40000)
@@ -884,7 +897,7 @@ def cli_main(args):
     # save results as .pkl 
     results_dir = pathlib.Path(args.results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_filename = results_dir / f"{config_path.stem}_linear_eval_jsin_{str_modifier}.pkl"
+    results_filename = results_dir / f"{config_path.stem}_linear_eval_jsin_{str_modifier}_center_eval_words.pkl"
     with open(results_filename, 'wb') as handle:
         pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
                        
