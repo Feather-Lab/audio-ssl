@@ -237,8 +237,8 @@ def get_rep_wrapped_model(model, input, layer):
     rep = rep.flatten(start_dim=1)
     return rep
 
-def extract_features_param_decoding(model_1, model_2, loader, layer='avgpool', num_batches=None):
-    if num_batches is None or num_batches == -1:
+def extract_features_param_decoding(model_1, model_2, loader, num_batches=None):
+    if num_batches is None:
         num_batches = len(loader)
 
     responses_clean_1, responses_augmented_1, responses_clean_2, responses_augmented_2,  = [], [], [], []
@@ -248,10 +248,12 @@ def extract_features_param_decoding(model_1, model_2, loader, layer='avgpool', n
         for clean_audio, augmented_audio, param, label in tqdm(loader):
             clean_audio = clean_audio.cuda()
             augmented_audio = augmented_audio.cuda()
-            responses_clean_1.append(get_rep_wrapped_model(model_1, clean_audio, layer).cpu())
-            responses_augmented_1.append(get_rep_wrapped_model(model_1, augmented_audio, layer).cpu())
-            responses_clean_2.append(get_rep_wrapped_model(model_2, clean_audio, layer).cpu())
-            responses_augmented_2.append(get_rep_wrapped_model(model_2, augmented_audio, layer).cpu())
+            # get invar head as model 1
+            responses_clean_1.append(get_rep_wrapped_model(model_1, clean_audio, 'invar_head'))
+            responses_augmented_1.append(get_rep_wrapped_model(model_1, augmented_audio, 'invar_head'))
+            # get equivar head as model 2 
+            responses_clean_2.append(get_rep_wrapped_model(model_2, clean_audio, 'equivar_head'))
+            responses_augmented_2.append(get_rep_wrapped_model(model_2, augmented_audio, 'equivar_head'))
 
             params.append(param)
             labels.append(label)
@@ -322,19 +324,6 @@ def main(args):
             )
 
     # Model Loading
-    config_model_invariant_path = Path(args.invar_model_config) # Path('model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml')
-    config_model_invariant = yaml.load(open(config_model_invariant_path, 'r'), Loader=yaml.FullLoader)
-
-    if args.invar_model_ckpt == '':
-        checkpoint_dir = Path(args.exp_dir) / f"{config_model_invariant_path.stem}/checkpoints"
-        # Get latest ckpt for equivariant model 
-        path_model_invariant = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1]
-    else:
-        path_model_invariant = args.invar_model_ckpt  
-    print('Invariant checkpoint path: ', path_model_invariant)
-
-    invar_model_name = config_model_invariant_path.stem
-
 
     if args.config_list:
         with open(args.config_list, 'rb') as f:
@@ -355,33 +344,23 @@ def main(args):
 
     equivar_model_name = config_model_equivariant_path.stem
 
+    equivariant_model = LitAudioSSL.load_from_checkpoint(config=config_model_equivariant, checkpoint_path=path_model_equivariant).model.cuda().eval()
 
-    print(f"Running models: {invar_model_name} and {equivar_model_name}")
-
-    invariant_model = LitAudioSSL.load_from_checkpoint(config=config_model_invariant, checkpoint_path=path_model_invariant)
-    all_layers = invariant_model.metamer_layers
-    invariant_model = invariant_model.model.eval().cuda()
-    equivariant_model = LitAudioSSL.load_from_checkpoint(config=config_model_equivariant, checkpoint_path=path_model_equivariant).model.eval().cuda()
-
-    layer = all_layers[args.job_id] if args.job_id > -1 else args.layer
 
     # set seed for replicable sampling
     seed_everything(0)
     # Extract Features for dB SNR decoding 
     rc_test_1, ra_test_1, rc_test_2, ra_test_2, params_test, labels_test = extract_features_param_decoding(
-        invariant_model, 
+        equivariant_model, 
         equivariant_model, 
         snr_test_loader,
         num_batches=args.num_eval,
-        layer=layer
-
     )
     rc_train_1, ra_train_1, rc_train_2, ra_train_2, params_train, labels_train = extract_features_param_decoding(
-        invariant_model, 
+        equivariant_model, 
         equivariant_model, 
         snr_train_loader,
         num_batches=args.num_train,
-        layer=layer
     )
 
     X1_train = torch.cat([rc_train_1, ra_train_1], dim=1).detach().cpu().numpy()
@@ -393,6 +372,7 @@ def main(args):
     X1_test = X1_test.reshape(X1_test.shape[0], -1)
     X2_test = X2_test.reshape(X2_test.shape[0], -1)
 
+    ridge_alpha = args.ridge_alpha
 
     ## Cut params to just be db SNR
     Y_train_db_SNR = params_train[:,0].detach().cpu().numpy()
@@ -418,8 +398,8 @@ def main(args):
     Y_train_db_SNR = (Y_train_db_SNR - db_snr_mean) / db_snr_std
     Y_test_db_SNR  = (Y_test_db_SNR - db_snr_mean) / db_snr_std
 
-    regression_1_db_snr = Ridge(alpha=args.ridge_alpha).fit(X1_train, Y_train_db_SNR)
-    regression_2_db_snr = Ridge(alpha=args.ridge_alpha).fit(X2_train, Y_train_db_SNR)
+    regression_1_db_snr = Ridge(alpha=ridge_alpha).fit(X1_train, Y_train_db_SNR)
+    regression_2_db_snr = Ridge(alpha=ridge_alpha).fit(X2_train, Y_train_db_SNR)
 
     score_1_db_snr = regression_1_db_snr.score(X1_test, Y_test_db_SNR)
     score_2_db_snr = regression_2_db_snr.score(X2_test, Y_test_db_SNR)
@@ -432,18 +412,16 @@ def main(args):
 
     # Extract Features for Filter param decoding 
     rc_test_1_filter, ra_test_1_filter, rc_test_2_filter, ra_test_2_filter, params_test_filter, labels_test_filter = extract_features_param_decoding(
-        invariant_model, 
+        equivariant_model, 
         equivariant_model, 
         filter_test_loader,
         num_batches=args.num_eval,
-        layer=layer
     )
     rc_train_1_filter, ra_train_1_filter, rc_train_2_filter, ra_train_2_filter, params_train_filter, labels_train_filter = extract_features_param_decoding(
-        invariant_model, 
+        equivariant_model, 
         equivariant_model, 
         filter_train_loader,
         num_batches=args.num_train,
-        layer=layer
     )
 
     X1_train_filter = torch.cat([rc_train_1_filter, ra_train_1_filter], dim=1).detach().cpu().numpy()
@@ -467,8 +445,8 @@ def main(args):
     Y_train_filter = (Y_train_filter - filter_mean) / filter_std
     Y_test_filter  = (Y_test_filter - filter_mean) / filter_std
 
-    regression_1_filter = Ridge(alpha=args.ridge_alpha).fit(X1_train_filter, Y_train_filter)
-    regression_2_filter = Ridge(alpha=args.ridge_alpha).fit(X2_train_filter, Y_train_filter)
+    regression_1_filter = Ridge(alpha=ridge_alpha).fit(X1_train_filter, Y_train_filter)
+    regression_2_filter = Ridge(alpha=ridge_alpha).fit(X2_train_filter, Y_train_filter)
 
     score_1_filter = regression_1_filter.score(X1_test_filter, Y_test_filter)
     score_2_filter = regression_2_filter.score(X2_test_filter, Y_test_filter)
@@ -500,12 +478,9 @@ def main(args):
             r2_invariant_pr2[AUGMENTATION_LIST[_]] =  pr2_score(Y_test_filter[:, _-1], preds_1_filter[:, _-1])
             r2_equivariant_pr2[AUGMENTATION_LIST[_]] =  pr2_score(Y_test_filter[:, _-1], preds_2_filter[:, _-1])
 
-
     print(f"Invariant Scores:, Equivariant Scores: ")
     print(f"{score_1_db_snr:.3f} (R^2 dB SNR), {score_2_db_snr:.3f} (R^2 dB SNR)")
     print(f"{score_1_filter:.3f} (R^2 filter), {score_2_filter:.3f} (R^2 filter)")
-
-    ridge_title_str = f"Ridge $\\alpha=${args.ridge_alpha:.1f}" if args.ridge_alpha != 0 else ''
     plt.figure(figsize=(10, 5))
     bar_width = 0.25
     bar_x = np.arange(len(r2_invariant.keys()))
@@ -516,11 +491,13 @@ def main(args):
     plt.xlabel('Augmentation')
     plt.ylabel('$R^2$ Score')
     plt.ylim(-1.1,1.1)
-    plt.title(f"Invariant model: {invar_model_name}\n Equivariant model: {equivar_model_name}\nLayer: {layer}\n{ridge_title_str}")
+    plt.title(f"Equivariant model: {equivar_model_name}\ninvariant head vs equivariant head")
     plt.legend()
-    fig_out_dir = Path('parameter_decoding') / f"{invar_model_name}_{equivar_model_name}"
+
+    fig_out_dir = Path('parameter_decoding') / f"{equivar_model_name}"
     fig_out_dir.mkdir(parents=True, exist_ok=True)
-    fig_out_name = fig_out_dir / f"{layer}_param_decoding_r2_by_augmentation{f"_{args.ridge_alpha:.0e}"if args.ridge_alpha != 0.0 else ''}"
+
+    fig_out_name = fig_out_dir / f"invar_equivar_ssl_head_param_decoding_r2_by_augmentation"
     plt.savefig(fig_out_name, transparent=False, bbox_inches='tight' )
 
     plt.figure(figsize=(10, 5))
@@ -533,16 +510,16 @@ def main(args):
     plt.xlabel('Augmentation')
     plt.ylabel("Pearson's $r^2$ Score")
     plt.ylim(-1.1,1.1)
-    plt.title(f"Invariant model: {invar_model_name}\n Equivariant model: {equivar_model_name}\nLayer: {layer}\n{ridge_title_str}")
+    plt.title(f"Equivariant model: {equivar_model_name}\ninvariant head vs equivariant head")
     plt.legend()
-    fig_out_dir.mkdir(parents=True, exist_ok=True)
-    fig_out_name = fig_out_dir / f"{layer}_param_decoding_pearsons_r2_by_augmentation{f"_{args.ridge_alpha:.0e}"if args.ridge_alpha != 0.0 else ''}"
+
+    fig_out_name = fig_out_dir / f"invar_equivar_ssl_head_param_decoding_pearsons_r2_by_augmentation"
     plt.savefig(fig_out_name, transparent=False, bbox_inches='tight' )
 
     # save results 
-    data_out_name = fig_out_dir / f"{layer}_r2_decoding_values{f"_{args.ridge_alpha:.0e}"if args.ridge_alpha != 0.0 else ''}.pkl"
-    data = dict(r2_invariant=r2_invariant, r2_equivariant=r2_equivariant,
-                 pr2_invariant=r2_invariant_pr2, pr2_equivariant=r2_equivariant_pr2)
+    data_out_name = fig_out_dir / f"invar_equivar_ssl_head_r2_decoding_values.pkl"
+    data = dict(r2_invariant_head=r2_invariant, r2_equivariant_head=r2_equivariant,
+                 pr2_invariant_head=r2_invariant_pr2, pr2_equivariant_head=r2_equivariant_pr2)
 
     with open(data_out_name, 'wb') as handle:
         pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -594,22 +571,16 @@ if __name__ == "__main__":
         help="Slurm job array index, used to select equivariant model."
     )
     parser.add_argument(
+        "--ridge_alpha",
+        default=0.0,
+        type=float,
+        help="Alpha to use in ridge regression. Default (0) is same as OLS."
+    )
+    parser.add_argument(
         "--exp_dir",
         default=Path("./model_checkpoints"),
         type=Path,
         help="Directory to save checkpoints and logs to. (Default: './exp')",
-    )
-    parser.add_argument(
-        "--invar_model_config",
-        default=Path("model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml"),
-        type=Path,
-        help="Path to invariant model config",
-    )
-    parser.add_argument(
-        "--invar_model_ckpt",
-        default='', # Path("model_checkpoints/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment/checkpoints/epoch=205-step=37080-best_speaker_task.ckpt"),
-        type=str,
-        help="Path to invariant model checkpoint",
     )
     parser.add_argument(
         "--equi_model_config",
@@ -624,12 +595,7 @@ if __name__ == "__main__":
         help="Path to equivariant model checkpoint",
     )
     parser.add_argument('--config_list', type=str, help='Path to list of config files.')
-    parser.add_argument(
-        "--ridge_alpha",
-        default=0.0,
-        type=float,
-        help="Alpha to use in ridge regression. Default (0) is same as OLS."
-    )
+
     args = parser.parse_args()
     main(args)
 
