@@ -498,6 +498,69 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
 
 
 
+class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
+    def __init__(
+            self,
+            speech_h5_path,
+            db_spl=60,
+            batch_size=1,
+            target_keys=None,
+            overfit=False,
+    ):
+        super().__init__()
+        self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
+        self.speech_metadata = pd.read_hdf(speech_h5_path)
+        self.speech_metadata = self.speech_metadata.dropna() ## Removes null label 
+
+        self.batch_size = batch_size
+        self.target_keys = target_keys
+        self.center_crop = audio_transforms.CenterCropForegroundBackground(signal_size=40_000, crop_length=40_000)
+        self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+
+
+    def class_map(self):
+        """
+        Loads the mapping between the word IDX and human readable word map.
+        """
+        word_and_speaker_encodings = pickle.load(
+            open("/mnt/home/igriffith/ceph/projects/cochdnn/robustness/audio_functions/word_and_speaker_encodings_jsinv3.pckl", "rb")
+        )
+        class_map = word_and_speaker_encodings["word_idx_to_word"]
+        return class_map, word_and_speaker_encodings
+
+    def __len__(self):
+        return len(self.speech_metadata) // (self.batch_size)
+    
+    def __getitem__(self, idx):
+        # Modify so batches are not sliding windows over dataset 
+        start = idx * self.batch_size 
+        end = start + self.batch_size 
+
+        speech_ixs = np.arange(start, end)
+
+        speech = self.speech_files['ndarray_data']['signal'][speech_ixs]
+        
+        audio = []
+        for speech_eg in speech:
+            speech_eg, _ = self.center_crop(speech_eg, None)
+            speech_eg, _ = self.set_dbSPL(torch.tensor(speech_eg), None)
+            audio.append(speech_eg)
+        audio = torch.stack(audio).float()
+        # shuffle the indices of speech and noise - externalize for label ix-ing
+        
+
+        # track labels of each combo 
+        targets = {}            
+        for target_key in self.target_keys:
+            targets[target_key] = []
+            target_type, target_name = target_key.split("/")
+            targets[target_key] = self.speech_metadata.loc[speech_ixs, target_name].values
+                    # elif target_type == 'noise':
+                    #     targets[target_key]  = self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix
+
+        return audio, targets
+
+
 class jsinv3_audioset_SSL(torch.utils.data.ConcatDataset):
     # Makes a dataset using pre-paired speech and audioset background sounds
     # Works with hdf5 files for the jsinv3 dataset.

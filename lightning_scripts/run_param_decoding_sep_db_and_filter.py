@@ -540,7 +540,7 @@ def main(args):
     plt.savefig(fig_out_name, transparent=False, bbox_inches='tight' )
 
     # save results 
-    data_out_name = fig_out_dir / f"{layer}_r2_decoding_values{f"_{args.ridge_alpha:.0e}"if args.ridge_alpha != 0.0 else ''}.pkl"
+    data_out_name = fig_out_dir / f"{layer}_r2_decoding_values{f"_ridge_alpha_{args.ridge_alpha:.0e}"if args.ridge_alpha != 0.0 else ''}.pkl"
     data = dict(r2_invariant=r2_invariant, r2_equivariant=r2_equivariant,
                  pr2_invariant=r2_invariant_pr2, pr2_equivariant=r2_equivariant_pr2)
 
