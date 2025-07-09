@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
-#SBATCH --array=0-7 #  0-7 in manifest
+#SBATCH --array=4,5 #  0-7 in manifest
 
 module load cuda cudnn nccl
 mamba activate cochdnn_ssl_pl

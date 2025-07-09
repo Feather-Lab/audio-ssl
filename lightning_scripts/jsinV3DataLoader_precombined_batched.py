@@ -548,7 +548,6 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
         audio = torch.stack(audio).float()
         # shuffle the indices of speech and noise - externalize for label ix-ing
         
-
         # track labels of each combo 
         targets = {}            
         for target_key in self.target_keys:
