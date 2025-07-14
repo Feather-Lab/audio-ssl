@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH --constraint=h100  # if you want a particular type of GPU
 #SBATCH -N 1
-#SBATCH --array=0-4 #0-3 # 0-4 in manifest; 0-6 if invar_to_augments; 0-4 for resnet18s
+#SBATCH --array=0 # -4 #0-3 # 0-4 in manifest; 0-6 if invar_to_augments; 0-4 for resnet18s
 
 # module purge
 # module load python

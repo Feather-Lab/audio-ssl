@@ -13,7 +13,7 @@ from pytorch_lightning.loggers import WandbLogger
 import robustness.audio_functions.audio_transforms as at 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
-from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
+from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals, CleanSpeechInNoiseValDatasetBatched
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 import pathlib
@@ -730,7 +730,10 @@ def cli_main(args):
     elif args.task == 'speaker':
         config['model']['arch_kwargs']['num_classes'] = {"signal/speaker_int": 433} 
         task_str = f"speaker_task"
+    
 
+    ## update target keys 
+    config['data']['target_keys'] = list(config['model']['arch_kwargs']['num_classes'].keys())
     print(f"Running {task_str} transfer")
     
     config['hparas']['task_loss_params'] = {key:value for key,value in config['hparas']['task_loss_params'].items() if key in config['model']['arch_kwargs']['num_classes'].keys()}
@@ -832,19 +835,32 @@ def cli_main(args):
             # fit classifier 
         trainer.fit(module)
 
-    # run test 
-    test_dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
-                                                train=False,
-                                                transform=None,
-                                                batch_size=config['hparas']['batch_size'],
-                                                eval_max=-1)
+    ######################################
+    # Run Eval
+    ######################################
+    def eval_collate_fn(batch):
+        audio, targets = batch[0] # unbox wrapper added by dataloader 
+        audio = audio.unsqueeze(1)
+        # # combine labels: each target is dict for each key, stack the values 
+        labels = {}
+        for label_key in targets.keys():
+            labels[label_key] = torch.from_numpy(targets[label_key])
+        return audio, labels
 
+
+    eval_speech_h5_path = '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/train_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
+
+    test_dataset = CleanSpeechInNoiseValDatasetBatched(speech_h5_path=eval_speech_h5_path,
+                                            target_keys=config['data']['target_keys'],
+                                            batch_size=config['hparas']['batch_size'],
+                                            )
+    
     test_dataloader = torch.utils.data.DataLoader(
         test_dataset,
         batch_size=1,
         num_workers=config['num_workers'],
         shuffle=False,
-        collate_fn=module.eval_collate_fn
+        collate_fn=eval_collate_fn
     )
 
     print("Running inference")
