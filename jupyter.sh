@@ -5,7 +5,7 @@
 #SBATCH --mem=8Gb
 #SBATCH --cpus-per-task=1
 #SBATCH --time=3:00:00
-#SBATCH --partition=genx
+##SBATCH --partition=genx
 
 
 mamba activate cochdnn_ssl_pl

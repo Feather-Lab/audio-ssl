@@ -11,7 +11,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
-#SBATCH --array=3 # 7,11,13,15,18 # 3,7,11,13,15,18 in manifest
+#SBATCH --array=3,7,11,13,15,18 # 3,7,11,13,15,18 in manifest
 
 module load cuda cudnn nccl
 mamba activate cochdnn_ssl_pl
@@ -37,5 +37,5 @@ srun -K python3 -u lightning_scripts/run_param_decoding_sep_db_and_filter.py  \
                                    --num_train 50 \
                                    --job_id $SLURM_ARRAY_TASK_ID \
                                    --invar_model_config model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-                                   --equi_model_config model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1_fixed_loss.yaml \
+                                   --equi_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_4e-01.yaml \
                                    --ridge_alpha 0.5

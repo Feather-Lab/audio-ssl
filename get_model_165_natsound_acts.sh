@@ -9,7 +9,7 @@
 #SBATCH --time=00:10:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=1-5 # 0-5 in equivariant manifest
+##SBATCH --array=0# 1-5 # 0-5 in equivariant manifest
 
 module load cuda cudnn nccl
 
@@ -32,12 +32,14 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --dir_name_modifier "latest_ckpt"
 
 
-# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1.yaml  \
-#                                    --ckpt_path model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1/checkpoints/epoch=51-step=9360-best_val.ckpt
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_8e-01.yaml  \
+                                   --dir_name_modifier "latest_ckpt"
+
+                                #    --ckpt_path model_checkpoints/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_1e-1/checkpoints/epoch=51-step=9360-best_val.ckpt
 
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_list_path train_config_manifests/kell2018_barlow_equivariant_lmbda_search_w_augments.pkl  \
-                                                                                --array_ix $SLURM_ARRAY_TASK_ID --dir_name_modifier "latest_ckpt"
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_list_path train_config_manifests/kell2018_barlow_equivariant_lmbda_search_w_augments.pkl  \
+#                                                                                 --array_ix $SLURM_ARRAY_TASK_ID --dir_name_modifier "latest_ckpt"
 
 
 
