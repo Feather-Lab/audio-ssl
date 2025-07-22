@@ -344,6 +344,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             blocked_batches=True,
             signal_augment=False,
             skip_aug_match=False,
+            clean_percentage=0.0,
             overfit=False,
     ):
         super().__init__()
@@ -359,6 +360,10 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.target_keys = target_keys
         self.blocked_batches = blocked_batches
+        # set params for clean signal sampling 
+        self.clean_percentage = clean_percentage
+        self.num_clean = int(batch_size * clean_percentage)
+
         self.signal_augment = signal_augment
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000, skip_aug_match=skip_aug_match)
@@ -401,6 +406,9 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         noise_batch_ixs = np.random.permutation(noise.shape[0])
         
         output_11, output_12, output_21, output_22 = [], [], [], []
+
+        if self.clean_percentage > 0:
+            pos_inf_ixs = np.random.choice(self.batch_size, size=self.num_clean, replace=False)
 
         if self.target_keys:
             # track labels of each combo 
@@ -462,7 +470,10 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
 
             cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
             cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)
-            
+
+            # if i is in pos inf snr samples, set to None 
+            if i in pos_inf_ixs:
+                noise_1 = None
              # randomly mix the speech and noise with the same DBSNR
             combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
             combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  

@@ -685,6 +685,12 @@ class CombineWithFixedDBSNR(torch.nn.Module):
             background_wav (torch.Tensor): the waveform that will be used as 
                 the background audio sample
         """
+
+        if rand_db_snr == np.inf:
+            return foreground_wav
+        elif rand_db_snr == -np.inf:
+            return background_wav
+
         rms_ratio = np.power(10.0, rand_db_snr / 20.0)
         # Demean signal and noise before computing rms
         if foreground_wav is not None:
@@ -725,15 +731,19 @@ class CombineWithRandomDBSNRWithParam(torch.nn.Module):
     Args: 
         low_snr (float): the low end for the range of dB SNR to draw from
         high_snr (float): the high end for the range of db SNR to draw from
-        rms_level (float): the end RMS value for the combined sound
+        clean_percentage (float): the proportion of examples to draw at +/- inf
 
     Returns:
         signal_in_noise, rand_db_snr 
 
     """
-    def __init__(self, low_snr=-10, high_snr=10):
+    def __init__(self, low_snr=-10, high_snr=10, clean_percentage: float=0.0):
         self.low_snr=low_snr
         self.high_snr=high_snr
+        self.clean_percentage = clean_percentage
+        self.pos_inf_p = clean_percentage / 2
+        self.neg_inf_p = clean_percentage / 2
+
         super(CombineWithRandomDBSNRWithParam, self).__init__()
 
     def forward(self, foreground_wav, background_wav):
@@ -745,6 +755,15 @@ class CombineWithRandomDBSNRWithParam(torch.nn.Module):
                 the background audio sample
         """
         rand_db_snr = self.low_snr + (self.high_snr - self.low_snr) * torch.rand(1)
+        if self.clean_percentage > 0:
+            rand_db_snr = np.random.choice([np.inf, -np.inf, rand_db_snr.item()],
+                                            p=[self.pos_inf_p, self.neg_inf_p, 1 - self.clean_percentage])
+        
+        if rand_db_snr == np.inf:
+            return foreground_wav,  np.inf
+        elif rand_db_snr == -np.inf:
+            return background_wav,  -np.inf
+
         rms_ratio = np.power(10.0, rand_db_snr / 20.0)
         # Demean signal and noise before computing rms
         if foreground_wav is not None:
@@ -782,12 +801,13 @@ class MatchedCombineWithRandomDBSNR(torch.nn.Module):
     """
     Combines two signals at the same random dB SNR level.
     """
-    def __init__(self, low_db=-10, high_db=10, return_param: bool=False, skip_aug_match: bool=False):
+    def __init__(self, low_db=-10, high_db=10, return_param: bool=False, skip_aug_match: bool=False, clean_percentage: float=0.0):
         super().__init__()
         self.low_db = low_db
         self.high_db = high_db
         self.return_param = return_param
-        self.combiner_random = CombineWithRandomDBSNRWithParam(low_db, high_db)
+        self.clean_percentage = clean_percentage
+        self.combiner_random = CombineWithRandomDBSNRWithParam(low_db, high_db, clean_percentage=clean_percentage)
         self.combiner_fixed = CombineWithFixedDBSNR()
         self.skip_aug_match = skip_aug_match
 
@@ -803,6 +823,7 @@ class MatchedCombineWithRandomDBSNR(torch.nn.Module):
             else:
                 return combined_1, combined_2, float(rand_db_snr)
         return combined_1, combined_2
+    
 
 class MatchedRandomSignalCrops(torch.nn.Module):
     """

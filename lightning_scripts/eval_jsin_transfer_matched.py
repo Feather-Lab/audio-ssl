@@ -514,9 +514,13 @@ class BYOLAClassifier(L.LightningModule):
         accuracy_dict = {}
         top5_dict = {}
         for task, task_loss in task_loss_dict.items():
-            task_acc = self.accuracy[task](logits[task], labels[task])
+            # filter examples with null label
+            task_IXS = (labels[task] != 0 ).nonzero(as_tuple=True)
+            task_logits = logits[task][task_IXS]
+            task_labels =  labels[task][task_IXS]
+            task_acc = self.accuracy[task](task_logits, task_labels)
             accuracy_dict[task] = task_acc
-            task_top5 = torch.isin(torch.topk(logits[task].softmax(-1), k=5, dim=-1).indices, labels[task]).any(-1).float().mean()
+            task_top5 = torch.isin(torch.topk(task_logits.softmax(-1), k=5, dim=-1).indices, task_labels).any(-1).float().mean()
             top5_dict[task] = task_top5
         return {"top1":accuracy_dict, "top5":top5_dict}
 
