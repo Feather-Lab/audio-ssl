@@ -4,24 +4,22 @@
 #SBATCH --error=outLogs/train_audioset_supervised_kell2018_%j.err
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-gpu=12
-
-#SBATCH --mem=68Gb
+#SBATCH --cpus-per-gpu=16
+#SBATCH --mem=1000Gb
 #SBATCH --time=1-00:00:00
 #SBATCH --partition=gpu
-#SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
+#SBATCH -N 1
 
-module purge
-module load python
-module load cuda cudnn nccl
+conda activate cochdnn_ssl_pl
 
-conda activate ~/ceph/conda_envs/cochdnn_ssl_pl
 
 export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
+export CUDA_LAUNCH_BLOCKING=1
 
-export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
+export PYTHONPATH=$PYTHONPATH:~/ceph/projects/cochdnn
+
 master_node=$SLURMD_NODENAME
 
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))

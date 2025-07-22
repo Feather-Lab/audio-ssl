@@ -12,7 +12,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
-##SBATCH --array=0-4 #-17 #0-7 for current  # 0-4 for kell2018 and resnet18 equivariant training manifests  
+#SBATCH --array=0-4 # 0-4 for kell2018 and resnet18 equivariant training manifests  
 
 module load cuda cudnn nccl
 
@@ -44,25 +44,36 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --train_epochs 6 \
 #                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_list_path train_config_manifests/kell2018_barlow_equivariant_lmbda_search_w_augments.pkl \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'relu2' \
-#                                    --optimizer "AdamW" --lr 0.01 \
-#                                    --task 'both' \
-#                                    --train_epochs 6 \
-#                                    --array_ix $SLURM_ARRAY_TASK_ID \
-#                                    --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
-
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_list_path train_config_manifests/kell2018_barlow_equivariant_lmbda_search_w_augments.pkl \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --layer_str 'relu2' \
+                                   --layer_str 'relu4' \
                                    --optimizer "AdamW" --lr 0.01 \
                                    --task 'both' \
                                    --train_epochs 6 \
+                                   --array_ix $SLURM_ARRAY_TASK_ID \
                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relu4' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'both' \
+#                                    --train_epochs 6 \
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                 #    --array_ix $SLURM_ARRAY_TASK_ID \
+
+
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relufc' \
+#                                    --optimizer "AdamW" --lr 0.01 \
+#                                    --task 'both' \
+#                                    --train_epochs 6 \
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout --supervised_backbone
 

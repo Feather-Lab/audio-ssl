@@ -505,17 +505,24 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
             db_spl=60,
             batch_size=1,
             target_keys=None,
+            return_noise=False,
+            sig_len = 40_000,
             overfit=False,
     ):
         super().__init__()
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
         self.speech_metadata = self.speech_metadata.dropna() ## Removes null label 
-
+        self.return_noise = return_noise
+        self.sig_len = sig_len
         self.batch_size = batch_size
         self.target_keys = target_keys
-        self.center_crop = audio_transforms.CenterCropForegroundBackground(signal_size=40_000, crop_length=40_000)
+        self.center_crop = audio_transforms.CenterCropForegroundBackground(signal_size=self.sig_len, crop_length=self.sig_len)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+
+        if self.return_noise:
+            noise_h5_path = "/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_unbalanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5"
+            self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
 
 
     def class_map(self):
@@ -557,6 +564,16 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
                     # elif target_type == 'noise':
                     #     targets[target_key]  = self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix
 
+        if self.return_noise:
+            noise = self.noise_files['ndarray_data']['signal'][speech_ixs]
+            noise_audio = []
+            for noise_eg in noise:
+                noise_eg, _ = self.center_crop(noise_eg, None)
+                noise_eg = audio_transforms.pad_or_trim_to_len(noise_eg, self.sig_len, mode='both')
+                noise_eg, _ = self.set_dbSPL(torch.tensor(noise_eg), None)
+                noise_audio.append(noise_eg)   
+            noise_audio = torch.stack(noise_audio).float()
+            return audio, noise_audio, targets
         return audio, targets
 
 

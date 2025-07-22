@@ -4,6 +4,7 @@ import numpy as np
 import lightning as L
 import yaml
 import sys, os
+from copy import deepcopy
 import pickle
 from lightning_ssl import LitAudioSSL 
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
@@ -73,7 +74,7 @@ class SSLClassifier(L.LightningModule):
                 at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
             ])
         
-        if config['model']['arch_kwargs']['backbone'] == 'kell2018':
+        if config['model']['arch_kwargs']['backbone'] == 'kell2018' or 'kell2018' in config['model']['arch_name']:
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
                                     'batchnorm0': 211,
@@ -684,6 +685,20 @@ def cli_main(args):
         config['data'] = {}
         use_byola = True 
 
+    elif args.supervised_backbone:
+        config['hparas']['task_loss_params'] = {
+            "signal/word_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0},                       # init loss is ~6.6 
+            "noise/labels_int":
+                {"loss_type": 'bcewithlogitsloss',
+                "weight": 1.0},                      # init loss is ~200 
+            "signal/speaker_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0}
+            }
+
+
     # update config for transfer learning task
     config['num_workers'] = args.num_workers
     config['num_gpus'] = args.gpus
@@ -713,6 +728,7 @@ def cli_main(args):
         time_avg_str = "full_rep_"
 
     scheduler_str = ""
+
     if args.lr_scheduler:
         config['hparas']['lr_schedule'] = True
         config['hparas']['num_warmup_steps_or_ratio'] = 0
@@ -736,7 +752,11 @@ def cli_main(args):
     config['data']['target_keys'] = list(config['model']['arch_kwargs']['num_classes'].keys())
     print(f"Running {task_str} transfer")
     
+
     config['hparas']['task_loss_params'] = {key:value for key,value in config['hparas']['task_loss_params'].items() if key in config['model']['arch_kwargs']['num_classes'].keys()}
+
+    print(config['hparas']['task_loss_params'] )
+    print(config['model']['arch_kwargs'] )
 
     if args.w_mlp:
         config['model']['classifier'] = {}

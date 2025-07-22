@@ -895,6 +895,41 @@ class ApplySingleAugmentSox(torch.nn.Module):
             return signal, params
         return signal
 
+
+class PadOrTrimToLen(torch.nn.Module):
+    """
+    Pads or trims signals to match total frame length n.
+    """
+    def __init__(self, n, mode="both", kwargs_pad={}):
+        super().__init__()
+        self.n = n
+        self.mode = mode
+        self.kwargs_pad = kwargs_pad
+
+    def forward(self, foreground_wav, background_wav):
+        """
+        Args:
+            foreground_wav (torch.Tensor): the waveform that will be used as
+                the foreground audio sample (usually speech)
+            background_wav (torch.Tensor): the waveform that will be used as
+                the background audio sample
+        """
+        if foreground_wav is not None:
+
+            foreground_wav = pad_or_trim_to_len(foreground_wav.numpy(), self.n, mode=self.mode)
+            foreground_wav = torch.from_numpy(foreground_wav)
+        else:
+            foreground_wav = None
+
+        if background_wav is not None:
+            background_wav = pad_or_trim_to_len(background_wav.numpy(), self.n, mode=self.mode)
+            background_wav = torch.from_numpy(background_wav)
+        else:
+            background_wav = None
+
+        return foreground_wav, background_wav
+    
+
 ###################################
 # Sox transforms for augmentations 
 ###################################

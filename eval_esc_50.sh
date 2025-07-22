@@ -37,6 +37,10 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
 #                                    --model_ckpt_dir model_checkpoints \
 
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
+# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_8e-01.yaml \
+#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+#                                    --model_ckpt_dir model_checkpoints \
+
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml \
                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
                                    --model_ckpt_dir model_checkpoints \
