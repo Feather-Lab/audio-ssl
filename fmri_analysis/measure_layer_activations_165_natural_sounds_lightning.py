@@ -54,6 +54,7 @@ import pathlib
 import yaml
 
 import torch
+from lightning_scripts.byola_lightning_module import BYOLAModule
 from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_scripts.lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 import robustness.audio_functions.audio_transforms as at
@@ -92,7 +93,7 @@ def cli_main(args):
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
 
     ############Get model checkpoint############
-    if args.ckpt_path == "":
+    if args.ckpt_path == "" and 'byol' not in str(config_path):
         checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
         ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
         ckpt_path = ckpt_paths[-1] # get latest checkpoint 
@@ -103,15 +104,23 @@ def cli_main(args):
     ############LOAD NETWORK############
     if "supervised" in str(config_path):
         module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        model = module.model.eval().cuda()
+    elif 'byol' in str(config_path):
+        module = BYOLAModule(config=config)
+        module.metamer_layers = ['final']
+        model = module.eval().cuda()
     else:
         module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+        model = module.model.eval().cuda()
     all_layers = module.metamer_layers
-    model = module.model.eval().cuda()
 
     ##############Begin Define Parameters#################
     save_features_dir = pathlib.Path(args.save_features_dir)
     model_name_modfier = f"_{args.dir_name_modifier}" if args.dir_name_modifier != '' else ''
-    save_features_dir = save_features_dir / f"{config_path.stem}{model_name_modfier}"
+    if 'byol' in str(config_path):
+        save_features_dir = save_features_dir / f"byol-a{model_name_modfier}"
+    else:
+        save_features_dir = save_features_dir / f"{config_path.stem}{model_name_modfier}"
     if not save_features_dir.is_dir():
         save_features_dir.mkdir(parents=True, exist_ok=True)
    
@@ -121,7 +130,7 @@ def cli_main(args):
 
     wavs_location = os.path.join(fMRI_DATA_PATH, '165_natural_sounds')
 
-    SR=20000 # Match with the networks we are building/training
+    SR=16000 if 'byol' in str(config_path) else 20000 # Match with the networks we are building/training
     MEASURE_DUR=2
     wav_array = np.empty([165, SR*MEASURE_DUR])
     for wav_idx, wav_data in enumerate(sound_list):
@@ -153,13 +162,19 @@ def cli_main(args):
         sound = sound.float().cuda()
 
         with torch.no_grad():
-            predictions, rep, layer_returns = model(sound, with_latent=True) # Corresponding representation
+            if 'byol' in str(config_path):
+                layer_returns = model(sound) 
+            else:
+                predictions, rep, layer_returns = model(sound, with_latent=True) # Corresponding representation
 
         # Make the array have the correct size
         if sound_idx == 0:
             for layer in all_layers:
                 print(layer)
-                layer_shape_165 = layer_returns[layer].shape
+                if 'byol' in str(config_path):
+                    layer_shape_165 = layer_returns.shape
+                else:
+                    layer_shape_165 = layer_returns[layer].shape
                 layer_shape_full = np.prod(np.array(layer_shape_165))
                 if len(layer_shape_165)==4:
                     layer_shape_unraveled = layer_shape_165[1]*layer_shape_165[2]# don't take the time dimension into account
@@ -169,12 +184,17 @@ def cli_main(args):
                 net_layer_dict[layer] = net_h5py_file.create_dataset(layer, (165, layer_shape_unraveled), dtype='float32')
 
         for layer_idx, layer in enumerate(all_layers):
+            if 'byol' in str(config_path):
+                layer_rep = layer_returns
+            else:
+                layer_rep = layer_returns[layer] 
+
             # time averaged features, so that they can be related to the fMRI activations
-            if layer_returns[layer].ndim==4: # NCHW (W is time)
-                net_layer_dict[layer][sound_idx,:] = np.mean(layer_returns[layer].cpu().detach().numpy(),3).ravel()
+            if layer_rep.ndim==4: # NCHW (W is time)
+                net_layer_dict[layer][sound_idx,:] = np.mean(layer_rep.cpu().detach().numpy(),3).ravel()
             else: # fully connected layers do not have a temporal component.  
-                net_layer_dict[layer][sound_idx,:] = layer_returns[layer].cpu().detach().numpy().ravel()
-            net_layer_dict_full[layer][sound_idx,:] = layer_returns[layer].cpu().detach().numpy().ravel()
+                net_layer_dict[layer][sound_idx,:] = layer_rep.cpu().detach().numpy().ravel()
+            net_layer_dict_full[layer][sound_idx,:] = layer_rep.cpu().detach().numpy().ravel()
     net_h5py_file.close()
     net_h5py_file_full.close()
 

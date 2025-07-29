@@ -416,8 +416,10 @@ class BYOLAClassifier(L.LightningModule):
             f_max=config.f_max,
         )
 
+        # hack so resample not put on gpu 
+        self.resample_audio = lambda x:  torchaudio.functional.resample(x, orig_freq=20_000, new_freq=16_000)
+
         self.transforms = at.AudioCompose([
-                at.AudioToTensor(),
                 at.CombineWithRandomDBSNR(low_snr=config['audio_transforms']['low_snr'],
                                         high_snr=config['audio_transforms']['high_snr']),
                 at.RMSNormalizeForegroundAndBackground(rms_level=config['audio_transforms']['rms_level']),
@@ -509,6 +511,7 @@ class BYOLAClassifier(L.LightningModule):
 
     def predict_step(self, batch):
         audio, labels = batch
+        audio = self.resample_audio(audio)
         logits = self.forward(audio) 
         loss, task_loss_dict = self.multi_task_loss(logits, labels, return_indiv_loss=True)
         accuracy_dict = {}
@@ -575,12 +578,14 @@ class BYOLAClassifier(L.LightningModule):
             # use transforms pre-defined in feature_extractor - None instead of noise to skip
             if self.config.get('with_noise', False):
                 noise = noise
+                noise = self.resample_audio(torch.from_numpy(noise))
             else:
                 noise = None 
+            signal = self.resample_audio(torch.from_numpy(signal))
             signal, _ = self.transforms(signal, noise)
             if signal is None:
                 # Signal was none & has null label class 
-                signal = torch.zeros(1,40000)
+                signal = torch.zeros(1,32000)
             signals.append(signal)
         signals = torch.cat(signals).unsqueeze(1) # add back channel dim
         return signals, labels  
@@ -599,13 +604,33 @@ class BYOLAClassifier(L.LightningModule):
         # Only fit on clean targets 
         for (signal, noise) in  zip(*batch[:2]):
             # use transforms pre-defined in feature_extractor - None instead of noise to skip
+            signal = self.resample_audio(torch.from_numpy(signal))
             signal, _ = self.transforms(signal, None)
             if signal is None:
                 # Signal was none & has null label class 
-                signal = torch.zeros(1,40000)
+                signal = torch.zeros(1,32000)
             signals.append(signal)
         signals = torch.cat(signals).unsqueeze(1) # add back channel dim
         return signals, labels  
+
+    def predict_collate_fn(self, batch):
+        audio, targets = batch[0] # unbox wrapper added by dataloader 
+        # audio = audio.unsqueeze(1)
+        signals = []
+        for signal in audio:
+            signal = self.resample_audio(signal)
+            signal, _ = self.transforms(signal, None)
+            if signal is None:
+                # Signal was none & has null label class 
+                signal = torch.zeros(1,32000)
+            signals.append(signal)   
+        signals = torch.cat(signals).unsqueeze(1) # add back channel dim
+
+        # # combine labels: each target is dict for each key, stack the values 
+        labels = {}
+        for label_key in targets.keys():
+            labels[label_key] = torch.from_numpy(targets[label_key])
+        return signals, labels
     
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
@@ -845,7 +870,7 @@ def cli_main(args):
         devices=args.gpus,
         accelerator="gpu", 
         strategy='ddp' if args.gpus > 1 else 'auto',
-        val_check_interval = 2000, 
+        # val_check_interval = 2000, 
         # limit_train_batches=2,
         # limit_val_batches=2,
         gradient_clip_val=1, # clipt grad l2 norm to 1 
@@ -871,6 +896,7 @@ def cli_main(args):
             labels[label_key] = torch.from_numpy(targets[label_key])
         return audio, labels
 
+    eval_collate_fn = module.predict_collate_fn if 'byol-a' in str(config_path) else eval_collate_fn
 
     eval_speech_h5_path = '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/train_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
 

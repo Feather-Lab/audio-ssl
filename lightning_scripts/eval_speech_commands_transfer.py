@@ -6,6 +6,7 @@ import yaml
 import sys, os
 import pickle
 from lightning_ssl import LitAudioSSL 
+from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
@@ -52,21 +53,26 @@ class CenterCropOrPad:
 
 
 class SSLClassifier(L.LightningModule):
-    def __init__(self, config, ckpt_path, layer_out):
+    def __init__(self, config, ckpt_path, layer_out, supervised_backbone=False):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
         self.layer_out = layer_out
         # init the pretrained LightningModule
         # Set strict to false to ignore loading in pre-trained classifier 
-        self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+        if supervised_backbone:
+            self.feature_extractor = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+            self.config['model']['arch_kwargs']['backbone'] = config['model']['arch_name']
+
+        else:
+            self.feature_extractor = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()    
         self.feature_extractor = torch.compile(self.feature_extractor)
         self.feature_extractor.freeze()
         self.time_avg_rep = config['model']['arch_kwargs'].get('time_average', True)
 
         # softcode size dict at some point 
 
-        if config['model']['arch_kwargs']['backbone'] == 'kell2018':
+        if config['model']['arch_kwargs']['backbone'] == 'kell2018' or 'kell2018' in config['model']['arch_name']:
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
                                     'batchnorm0': 211,
@@ -586,7 +592,12 @@ def cli_main(args):
     config['hparas']['lr'] = args.lr 
     config['hparas']['epochs'] = 5
     # don't load in classifier head if it exists 
-    config['model']['arch_kwargs']['supervised'] =  False
+    if not args.supervised_backbone:
+        config['model']['arch_kwargs']['supervised'] =  False
+
+    if 'arch_kwargs' not in config['model'].keys():
+        config['model']['arch_kwargs'] = {}
+        
     config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
 
     time_avg_str = ""
@@ -630,7 +641,8 @@ def cli_main(args):
     else:
         module = SSLClassifier(config=config,
                            ckpt_path=ckpt_path,
-                           layer_out=args.layer_str)
+                           layer_out=args.layer_str,
+                            supervised_backbone=args.supervised_backbone)
 
     ## Check if existing classifier_ckpt exists 
     classifier_ckpts = list(classifier_checkpoint_dir.rglob("*.ckpt"))
@@ -716,6 +728,7 @@ def cli_main(args):
     # save results as .pkl 
     results_dir = pathlib.Path(args.results_dir) / "linear_eval_speech_commands"
     results_dir.mkdir(parents=True, exist_ok=True)
+
     results_filename = results_dir / f"{config_path.stem}_{str_modifier}.pkl"
     with open(results_filename, 'wb') as handle:
         pickle.dump(output_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -780,6 +793,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr_scheduler', action=BooleanOptionalAction, help='Use lr scheduler?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
+    parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
 
     args = parser.parse_args()
 
