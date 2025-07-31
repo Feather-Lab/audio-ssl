@@ -156,7 +156,7 @@ class SSLBaseModelDualTask(nn.Module):
                 self.f.avgpool = nn.Flatten()
                 proj_out_dim = 46592 if 'resnet18' in backbone else 78336
 
-        elif 'kell' in backbone:
+        elif 'kell' in backbone and 'ssl' not in backbone:
             self.f.dropout = nn.Identity()
             self.f.classification = nn.Identity()
         # projection head (Following exactly barlow twins offical repo)

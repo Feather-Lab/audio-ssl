@@ -407,6 +407,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         
         output_11, output_12, output_21, output_22 = [], [], [], []
 
+        pos_inf_ixs = None
         if self.clean_percentage > 0:
             pos_inf_ixs = np.random.choice(self.batch_size, size=self.num_clean, replace=False)
 
@@ -471,9 +472,10 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
             cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)
 
-            # if i is in pos inf snr samples, set to None 
-            if i in pos_inf_ixs:
-                noise_1 = None
+            # if i is in pos inf snr samples, set to None
+            if self.clean_percentage > 0:
+                if i in pos_inf_ixs:
+                    noise_1 = None
              # randomly mix the speech and noise with the same DBSNR
             combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
             combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
