@@ -39,7 +39,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
                                  
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/kell2018_sym_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/kell2018_dual_inv_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 
