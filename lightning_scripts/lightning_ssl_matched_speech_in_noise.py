@@ -128,9 +128,19 @@ class LitAudioSSL(L.LightningModule):
         if self.ssl_task == 'dual':
             # concat is handled in the paired loss function 
             loss_ssl, inv_loss, eq_loss = self.ssl_loss(out_11, out_12, out_21, out_22)
+            if self.loss_kwargs.get('return_both_losses', False):
+                # unpack invariant losses for foregrounds and backgrounds 
+                inv_loss, inv_fg_loss, inv_bg_loss = inv_loss # is tuple with total, fg, bg 
+                self.log(f"{step_type}_inv_fg_loss", inv_fg_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+                self.log(f"{step_type}_inv_bg_loss", inv_bg_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+                # unpack equivariant losses for foregrounds and backgrounds 
+                eq_loss, eq_fg_loss, eq_bg_loss = eq_loss # is tuple with total, fg, bg 
+                self.log(f"{step_type}_eq_fg_loss", eq_fg_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+                self.log(f"{step_type}_eq_bg_loss", eq_bg_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
 
             self.log(f"{step_type}_inv_loss", inv_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
             self.log(f"{step_type}_eq_loss", eq_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
+
 
         else:
             if self.ssl_task == 'word':
@@ -409,6 +419,7 @@ class LitAudioSSL(L.LightningModule):
     def get_loss(self):
         self.ssl_loss_str = self.config['hparas']['ssl_loss_str'] # str for logs 
         loss_kwargs = self.config['hparas'].get('ssl_loss_kwargs', None) 
+        self.loss_kwargs = loss_kwargs
         self.inv_loss = None
         self.eq_loss = None
         if 'paired' in  self.ssl_loss_str:
@@ -419,7 +430,10 @@ class LitAudioSSL(L.LightningModule):
             loss_fn_eq = self.get_loss_fn(loss_kwargs['loss_fn_eq'], loss_fn_eq_kwargs)
             self.eq_loss_type = loss_kwargs['loss_fn_eq']
             paired_loss =  ssl_losses.__dict__[self.config['hparas']['ssl_loss']]
-            ssl_loss = paired_loss(loss_fn_inv=loss_fn_inv, loss_fn_eq=loss_fn_eq, lmda=loss_kwargs['lmda'])
+            if paired_loss ==  ssl_losses.__dict__['Dual_Paired_Loss']:
+                ssl_loss = paired_loss(loss_fn_inv=loss_fn_inv, loss_fn_eq=loss_fn_eq, lmda=loss_kwargs['lmda'], return_both_losses=loss_kwargs.get('return_both_losses', False) )
+            else:
+                ssl_loss = paired_loss(loss_fn_inv=loss_fn_inv, loss_fn_eq=loss_fn_eq, lmda=loss_kwargs['lmda'])
         else:
             ssl_loss = self.get_loss_fn(self.config['hparas']['ssl_loss'], loss_kwargs)
         return ssl_loss

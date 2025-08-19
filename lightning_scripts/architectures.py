@@ -164,7 +164,8 @@ class SSLBaseModelDualTask(nn.Module):
         ## Assumes same dims for inv and equi tasks 
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv = ProjectionHead(projector_dims)
-        self.g_equi = ProjectionHead(projector_dims)
+        self.g_equi_fg = ProjectionHead(projector_dims)
+        self.g_equi_bg = ProjectionHead(projector_dims)
         if supervised_dropout:
             self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
@@ -180,7 +181,8 @@ class SSLBaseModelDualTask(nn.Module):
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
         inv_out = self.g_inv(feature)
-        equi_out = self.g_equi(feature)
+        equi_out = self.g_equi_fg(feature)
+        equi_out = self.g_equi_bg(feature)
         if not self.supervised:
             return feature, (inv_out, equi_out), None 
         else:
@@ -228,7 +230,8 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv_fg = ProjectionHead(projector_dims)
         self.g_inv_bg = ProjectionHead(projector_dims)
-        self.g_equi = ProjectionHead(projector_dims)
+        self.g_equi_fg = ProjectionHead(projector_dims)
+        self.g_equi_bg = ProjectionHead(projector_dims)
         if supervised_dropout:
             self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
@@ -245,7 +248,8 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
         feature = torch.flatten(x, start_dim=1)
         inv_fg_out = self.g_inv_fg(feature)
         inv_bg_out = self.g_inv_bg(feature)
-        equi_out = self.g_equi(feature)
+        equi_out = self.g_equi_fg(feature)
+        equi_out = self.g_equi_bg(feature)
         if not self.supervised:
             return feature, (inv_fg_out, inv_bg_out, equi_out), None 
         else:
@@ -259,6 +263,74 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
             else:
                 logits = self.lin_cls(feature)
         return feature, (inv_fg_out, inv_bg_out, equi_out), logits
+    
+
+class SSLBaseModelDualPairedLoss(nn.Module):
+    def __init__(self, backbone='resnet50', projector_dims=[512, 512], proj_out_dim=2048, in_channels=1, num_classes=794, supervised=False, frame_wise_loss=False, supervised_dropout=False, layer_for_cls='relufc', **kwargs):
+        super().__init__()
+        self.supervised = supervised
+        self.supervised_dropout = supervised_dropout
+        self.layer_for_cls = layer_for_cls
+        self.backbone = backbone
+        self.frame_wise_loss = frame_wise_loss
+        self.f = robustness_architectures.__dict__[backbone]()
+
+        if 'resnet' in backbone:
+            self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+            self.f.fc = nn.Identity()
+            if "max_to_avg_pool" in kwargs:
+                self.f.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+            if self.frame_wise_loss:
+                # don't average over time dimensions - will fold into batch dimension 
+                self.freq_avg = nn.AdaptiveAvgPool2d((1, None))
+                # self.f.avgpool = nn.AdaptiveAvgPool2d((1, None))
+                self.ssl_rep_name = 'layer4'
+            if "no_avgpool" in kwargs:
+                self.f.avgpool = nn.Flatten()
+                proj_out_dim = 46592 if 'resnet18' in backbone else 78336
+
+        elif 'kell' in backbone and 'ssl' not in backbone:
+            self.f.dropout = nn.Identity()
+            self.f.classification = nn.Identity()
+        # projection head (Following exactly barlow twins offical repo)
+        ## Assumes same dims for inv and equi tasks 
+        projector_dims = [proj_out_dim] + projector_dims
+        self.g_inv_fg = ProjectionHead(projector_dims)
+        self.g_inv_bg = ProjectionHead(projector_dims)
+        self.g_equi_fg = ProjectionHead(projector_dims)
+        self.g_equi_bg = ProjectionHead(projector_dims)
+        if supervised_dropout:
+            self.lin_cls_dropout = nn.Dropout(0.5)
+        if supervised:
+            if isinstance(num_classes, dict): # Make multiple fully conected layers
+                all_fc_layers = {}
+                for task in num_classes.keys():
+                    all_fc_layers[task] = nn.Linear(proj_out_dim, num_classes[task]) 
+                self.lin_cls = nn.ModuleDict(all_fc_layers)
+            else:
+                self.lin_cls = nn.Linear(proj_out_dim, num_classes)
+
+    def forward(self, x):
+        x = self.f(x)
+        feature = torch.flatten(x, start_dim=1)
+        inv_fg_out = self.g_inv_fg(feature)
+        inv_bg_out = self.g_inv_bg(feature)
+        equi_fg_out = self.g_equi_fg(feature)
+        equi_bg_out = self.g_equi_bg(feature)
+        if not self.supervised:
+            return feature, (inv_fg_out, inv_bg_out, equi_fg_out, equi_bg_out), None 
+        else:
+            feature = feature.detach()
+            if self.supervised_dropout:
+                feature = self.lin_cls_dropout(feature)
+            if isinstance(self.lin_cls, nn.ModuleDict): 
+                logits = {}
+                for task, fc_l in self.lin_cls.items():
+                    logits[task] = fc_l(feature)
+            else:
+                logits = self.lin_cls(feature)
+        return feature, (inv_fg_out, inv_bg_out, equi_fg_out, equi_bg_out), logits
+    
 
 class SSLAudioModel(nn.Module):
     def __init__(self, projector_dims=[512, 512], proj_out_dim=2048, num_classes=794, supervised=False, **kwargs):

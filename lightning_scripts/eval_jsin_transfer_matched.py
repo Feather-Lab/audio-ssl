@@ -11,6 +11,7 @@ from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
+from lightning.pytorch.callbacks import LearningRateMonitor
 import robustness.audio_functions.audio_transforms as at 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
@@ -853,6 +854,9 @@ def cli_main(args):
             save_weights_only=True,
             verbose=True,
         ))
+    
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+    callbacks.append(lr_monitor)
     # callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
 
     log_basename = 'byol-a_base' if use_byola else config_path.stem

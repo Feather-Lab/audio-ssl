@@ -9,7 +9,7 @@
 #SBATCH --time=5:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-19 #0-19 for kell
+#SBATCH --array=3,7,11,13,15,18 #0-19 for kell
 
 # module load cuda cudnn nccl
 
@@ -41,6 +41,6 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
 #                                    --model_ckpt_dir model_checkpoints \
 
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml \
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_dual_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_1e-02.yaml \
                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
                                    --model_ckpt_dir model_checkpoints \

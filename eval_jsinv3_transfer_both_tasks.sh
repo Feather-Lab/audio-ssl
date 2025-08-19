@@ -7,8 +7,8 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=32Gb ## Just 32 if evaling 
-##SBATCH --time=20:00:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
-#SBATCH --time=00:12:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
+#SBATCH --time=20:00:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
+##SBATCH --time=00:12:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
@@ -55,27 +55,27 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'relu0' \
-#                                    --optimizer "AdamW" --lr 0.01 \
-#                                    --task 'both' \
-#                                    --train_epochs 6 \
-#                                    --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
-                                #    --array_ix $SLURM_ARRAY_TASK_ID \
-
-
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path byol-a/config.yaml \
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/kell2018_dual_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_1e-01.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --layer_str 'final' \
+                                   --layer_str 'relu4' \
                                    --optimizer "AdamW" --lr 0.001 \
                                    --task 'both' \
-                                   --train_epochs 3 \
-                                   --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   --train_epochs 6 \
+                                   --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                #    --array_ix $SLURM_ARRAY_TASK_ID \
+
+
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path byol-a/config.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'final' \
+#                                    --optimizer "AdamW" --lr 0.001 \
+#                                    --task 'both' \
+#                                    --train_epochs 3 \
+#                                    --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py \
 #                                    --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
