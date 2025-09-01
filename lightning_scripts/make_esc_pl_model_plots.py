@@ -254,7 +254,7 @@ def downsample_activations(activations, num_activations, layer_random_projection
 def get_features_list(model, net_name, data_paths, data_labels_paths, fold, layer, 
                       num_activations, num_reps, SEED, scratch_activations_dir, 
                       sound_identifiers, overwrite, layer_random_projections=None,
-                      DUR_SECS=2):
+                      DUR_SECS=2, byola_arch=False):
     '''
     Passes each sound in data (in the form of a tensor) into model
     and collect activations from specified layer (features for svm)
@@ -288,7 +288,7 @@ def get_features_list(model, net_name, data_paths, data_labels_paths, fold, laye
     else:
         print("Running save_activations()")
         save_activations(data_paths,  model, net_name, layer, num_reps, SEED,
-                         scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS)
+                         scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS, byola_arch)
         print("Finished save_activations()")
        
         activations = []
@@ -360,7 +360,7 @@ def get_features_list(model, net_name, data_paths, data_labels_paths, fold, laye
     return activation_mat, data_labels, layer_random_projections
    
 def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
-                     scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS):
+                     scratch_activations_dir, sound_identifiers, overwrite, DUR_SECS, byola_arch):
     """
     Measures the activations for the sound and saves it into the scratch directory. 
     If the file already exists and overwrite is false, skips to the next sound.
@@ -413,14 +413,17 @@ def save_activations(data_paths, model, net_name, layer, num_reps, SEED,
         all_activations = []
         for clip in sound:
             with ch.no_grad():
-                predictions, rep, all_outputs = model(clip, with_latent=True, fake_relu=True)
-            if len(layer.split('/'))>=2:
-                split_layer = layer.split('/')
-                print(split_layer[0])
-                print('/'.join(split_layer[1:len(split_layer)]))
-                activations = all_outputs[split_layer[0]]['/'.join(split_layer[1:len(split_layer)])]
-            else:
-                activations = all_outputs[layer]
+                if byola_arch:
+                    activations, _, _ = model(clip,  with_latent=False, fake_relu=False)
+                else:
+                    predictions, rep, all_outputs = model(clip, with_latent=True, fake_relu=True)
+                    if len(layer.split('/'))>=2:
+                        split_layer = layer.split('/')
+                        print(split_layer[0])
+                        print('/'.join(split_layer[1:len(split_layer)]))
+                        activations = all_outputs[split_layer[0]]['/'.join(split_layer[1:len(split_layer)])]
+                    else:
+                        activations = all_outputs[layer]
             # make the activations numpy arrays not tensors
             activations = activations.detach().cpu().numpy()
             all_activations.append(activations)
@@ -461,7 +464,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                    average_test_predictions=False, 
                                    c_values=[0.01,0.1,1],
                                    overwrite=False,
-                                   DUR_SECS=2):
+                                   DUR_SECS=2,
+                                   byola_arch=False):
     """
     Trains an SVM to get predictions on ESC-50 sounds that are run through a pre-trained model.
     Inputs
@@ -488,6 +492,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
         if true, overwrites saved pickles for the first fold
     DUR_SECS : int
         duration of audio to give model
+    byola_arch : bool
+        if true, using BYOL-A arch which does not have layer dict
     """
     folds = [1, 2, 3, 4, 5]
     data_path = '/mnt/ceph/users/igriffith/datasets/ESC-50-master/audio/' # .wav files of the sound clips
@@ -513,7 +519,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                                          layer, num_activations, num_reps, 
                                                          SEED, scratch_activations_dir, 
                                                          sound_identifiers['train'], overwrite,
-                                                         DUR_SECS=DUR_SECS)
+                                                         DUR_SECS=DUR_SECS,
+                                                         byola_arch=byola_arch)
         print("getting test features")
 
         test_features, test_labels, layer_random_projections = get_features_list(model, net_name, test_data_paths, 
@@ -522,7 +529,8 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
                                                        SEED, scratch_activations_dir, 
                                                        sound_identifiers['test'], overwrite,
                                                        layer_random_projections=layer_random_projections,
-                                                       DUR_SECS=DUR_SECS)
+                                                       DUR_SECS=DUR_SECS,
+                                                       byola_arch=byola_arch)
         print("finished get_features_list()")
 
         # normalization
@@ -772,25 +780,32 @@ if __name__ == '__main__':
     model = module.model.eval()
 
     DUR_SECS=2
+    byola_arch=False
     if config['audio_transforms'].get('crop', False):
         DUR_SECS = config['audio_transforms']['crop_kwrgs']['crop_length']/20_000 # divide crop len by samp rate
 
 
-    metamer_layers = module.metamer_layers
     # model, ds, metamer_layers = build_network.main(return_metamer_layers=True)
-    print("Layer name: "+str(metamer_layers[args.LAYER_IDX]))
+    if 'byola' in str(config_path):
+        layer_for_rep = 'final' # TODO: is not used; update to eval at different depths
+        byola_arch = True
+    else:
+        metamer_layers = module.metamer_layers
+        layer_for_rep = metamer_layers[args.LAYER_IDX]
+    print("Layer name: "+str(layer_for_rep))
     model = model.cuda()
     # net_path = os.getcwd()
     # net_name = '-'.join(net_path.split('/')[-2:])
     net_name = f"{config_path.stem}_{ckpt_str}" # model name is stem of yaml config 
     get_predictions_and_make_plots(model, net_name,
                                    scratch_activations_dir=args.SCRATCH_DIR,
-                                   layer=metamer_layers[args.LAYER_IDX],
+                                   layer=layer_for_rep,
                                    num_activations=args.NUM_ACTIVATIONS,
                                    num_reps=args.NUM_REPS,
                                    SEED=args.SEED,
                                    average_test_predictions=args.AVG_TEST_PREDICTIONS,
                                    c_values=args.C_VALUES, 
                                    overwrite=args.OVERWRITE,
-                                   DUR_SECS=DUR_SECS)
+                                   DUR_SECS=DUR_SECS,
+                                   byola_arch=byola_arch)
 

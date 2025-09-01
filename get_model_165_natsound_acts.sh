@@ -22,7 +22,7 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path 'byol-a/config.yaml' 
+# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path 'byol-a/config.yaml' 
                                 #    --dir_name_modifier "latest_ckpt"
 
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml  \
@@ -33,8 +33,8 @@ python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py 
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml  \
 #                                    --dir_name_modifier "latest_ckpt"
 
-# python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_1e-02.yaml \
-#                                    --dir_name_modifier "latest_ckpt"
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/kell2018_dual_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_1e-02.yaml \
+                                #    --dir_name_modifier "latest_ckpt"
 
 
 # python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_8e-01.yaml  \

@@ -41,6 +41,7 @@ class SSLClassifier(L.LightningModule):
         self.save_hyperparameters()
         self.config = config
         self.layer_out = layer_out
+        self.byola_arch = False
         # init the pretrained LightningModule
         # Set strict to false to ignore loading in pre-trained classifier 
         if supervised_backbone:
@@ -119,6 +120,10 @@ class SSLClassifier(L.LightningModule):
                                     'fullyconnected': 4096,
                                     'relufc': 4096}
             
+        elif config['model']['arch_kwargs']['backbone'] in ['AudioNTT2020']:
+            layer_size_dict = {'input_after_preproc': 211,
+                                    'final': 2048}
+            self.byola_arch = True                     
         elif config['model']['arch_kwargs']['backbone'] in ['resnet18', 'resnet_multi_task18']:
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
@@ -201,12 +206,16 @@ class SSLClassifier(L.LightningModule):
         
     def forward(self, x):
         with torch.no_grad():
-            predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
-            activations = all_outputs[self.layer_out]
-            if self.time_avg_rep:
-                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+            if self.byola_arch:
+                activations, _, _ = self.feature_extractor.model(x,  with_latent=False, fake_relu=False)
+                
             else:
-                activations = activations.view(activations.shape[0], -1)
+                predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
+                activations = all_outputs[self.layer_out]
+                if self.time_avg_rep:
+                    activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+                else:
+                    activations = activations.view(activations.shape[0], -1)
                 # time average then flatten
             activations = activations.detach()
         if self.dropout:

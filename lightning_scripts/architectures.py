@@ -4,6 +4,9 @@ from torch import nn
 from torchvision.models.resnet import resnet50
 from robustness.audio_models import resnet50 as resnet50_robusntess
 import robustness.audio_models as robustness_architectures
+import sys 
+sys.path.append('byol-a')
+import byol_a.models as byol_a_models 
 import einops 
 
 class ProjectionHead(nn.Module):
@@ -68,7 +71,11 @@ class SSLBaseModelSingleTask(nn.Module):
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
 
-        self.f = robustness_architectures.__dict__[backbone]()
+        if 'AudioNTT' in backbone:
+            self.f = byol_a_models.__dict__[backbone](**kwargs.get('byola_kwargs'))
+
+        else:
+            self.f = robustness_architectures.__dict__[backbone]()
         
         if 'resnet' in backbone:
             self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
@@ -141,8 +148,13 @@ class SSLBaseModelDualTask(nn.Module):
         self.supervised_dropout = supervised_dropout
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
-        self.f = robustness_architectures.__dict__[backbone]()
 
+        if 'AudioNTT' in backbone:
+            self.f = byol_a_models.__dict__[backbone]()
+
+        else:
+            self.f = robustness_architectures.__dict__[backbone]()
+            
         if 'resnet' in backbone:
             self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
             self.f.fc = nn.Identity()
@@ -206,7 +218,11 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
         self.layer_for_cls = layer_for_cls
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
-        self.f = robustness_architectures.__dict__[backbone]()
+
+        if 'AudioNTT' in backbone:
+            self.f = byol_a_models.__dict__[backbone]()
+        else:
+            self.f = robustness_architectures.__dict__[backbone]()
 
         if 'resnet' in backbone:
             self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
@@ -273,7 +289,12 @@ class SSLBaseModelDualPairedLoss(nn.Module):
         self.layer_for_cls = layer_for_cls
         self.backbone = backbone
         self.frame_wise_loss = frame_wise_loss
-        self.f = robustness_architectures.__dict__[backbone]()
+        
+        if 'AudioNTT' in backbone:
+            self.f = byol_a_models.__dict__[backbone]()
+
+        else:
+            self.f = robustness_architectures.__dict__[backbone]()
 
         if 'resnet' in backbone:
             self.f.conv1 = nn.Conv2d(in_channels, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
