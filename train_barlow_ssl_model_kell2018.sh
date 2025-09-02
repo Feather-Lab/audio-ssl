@@ -7,11 +7,11 @@
 #SBATCH --cpus-per-gpu=16
 
 #SBATCH --mem=1000Gb
-#SBATCH --time=24:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100  # if you want a particular type of GPU
-#SBATCH -x workergpu156
+#SBATCH -x workergpu153
 
 ##SBATCH --constraint=h100  # if you want a particular type of GPU
 mamba activate cochdnn_ssl_pl

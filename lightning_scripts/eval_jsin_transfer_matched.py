@@ -42,6 +42,8 @@ class SSLClassifier(L.LightningModule):
         self.config = config
         self.layer_out = layer_out
         self.byola_arch = False
+        self.act_hook_dict = {}
+
         # init the pretrained LightningModule
         # Set strict to false to ignore loading in pre-trained classifier 
         if supervised_backbone:
@@ -122,8 +124,15 @@ class SSLClassifier(L.LightningModule):
             
         elif config['model']['arch_kwargs']['backbone'] in ['AudioNTT2020']:
             layer_size_dict = {'input_after_preproc': 211,
-                                    'final': 2048}
-            self.byola_arch = True                     
+                                "relu0": 5256960,
+                                "relu1": 1310400,
+                                "relu2": 323584,
+                                "relu3": 98304,
+                                "relu4": 98304,
+                                'final': 2048}
+            self.byola_arch = True          
+            self.register_relu_hook_by_index()
+
         elif config['model']['arch_kwargs']['backbone'] in ['resnet18', 'resnet_multi_task18']:
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
@@ -203,19 +212,35 @@ class SSLClassifier(L.LightningModule):
 
         self.accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
                         for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()}) 
-        
+    
+    # setup activation hook for byol-a architecture
+
+    def get_activation_hook(self, name):
+        def hook(model, input, output):
+            self.act_hook_dict[name] = output.detach()
+        return hook
+    
+    def register_relu_hook_by_index(self):
+        self.act_hook_dict.clear()
+        relu_index = int(re.search(r"\d+", self.layer_out).group())
+        relus = [m for m in self.feature_extractor.modules() if isinstance(m, nn.ReLU)]
+        if relu_index >= len(relus):
+            raise IndexError(f"Model only has {len(relus)} ReLU layers. Got index {relu_index}.")
+        relu_layer = relus[relu_index]
+        relu_layer.register_forward_hook(self.get_activation_hook(f"relu{relu_index}"))
+
     def forward(self, x):
         with torch.no_grad():
             if self.byola_arch:
-                activations, _, _ = self.feature_extractor.model(x,  with_latent=False, fake_relu=False)
-                
+                _, _, _ = self.feature_extractor.model(x,  with_latent=False, fake_relu=False)
+                activations = self.act_hook_dict[self.layer_out]
             else:
                 predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
                 activations = all_outputs[self.layer_out]
-                if self.time_avg_rep:
-                    activations = activations.mean(dim=-1).view(activations.shape[0], -1)
-                else:
-                    activations = activations.view(activations.shape[0], -1)
+            if self.time_avg_rep:
+                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+            else:
+                activations = activations.view(activations.shape[0], -1)
                 # time average then flatten
             activations = activations.detach()
         if self.dropout:
