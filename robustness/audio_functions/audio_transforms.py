@@ -916,6 +916,37 @@ class ApplySingleAugmentSox(torch.nn.Module):
             return signal, params
         return signal
 
+class PadToLen(torch.nn.Module):
+    """
+    Pads or trims signals to match total frame length n.
+    """
+    def __init__(self, n, mode="both", kwargs_pad={}):
+        super().__init__()
+        self.n = n
+        self.mode = mode
+        self.kwargs_pad = kwargs_pad
+
+    def forward(self, foreground_wav, background_wav):
+        """
+        Args:
+            foreground_wav (torch.Tensor): the waveform that will be used as
+                the foreground audio sample (usually speech)
+            background_wav (torch.Tensor): the waveform that will be used as
+                the background audio sample
+        """
+        if foreground_wav is not None:
+
+            foreground_wav = pad_to_len(foreground_wav, self.n, mode=self.mode)
+        else:
+            foreground_wav = None
+
+        if background_wav is not None:
+            background_wav = pad_to_len(background_wav, self.n, mode=self.mode)
+        else:
+            background_wav = None
+
+        return foreground_wav, background_wav
+
 
 class PadOrTrimToLen(torch.nn.Module):
     """
@@ -961,6 +992,41 @@ def loguniform(low, high, size=None):
     Helper function to draw samples uniformly on a log scale.
     """
     return np.exp(np.random.uniform(low=np.log(low), high=np.log(high), size=size))
+
+
+
+def pad_to_len(x, n, mode='both', kwargs_pad={}):
+    """
+    Increases the length of a one-dimensional signal
+    by padding the array. If the difference
+    between `len(x)` and `n` is odd, this function will default to
+    adding/removing the extra sample at the end of the signal.
+    
+    Args
+    ----
+    x (np.ndarray): one-dimensional input signal
+    n (int): length of output signal
+    mode (str): specify which end of signal to modify
+        (default behavior is to symmetrically modify both ends)
+    kwargs_pad (dict): keyword arguments for np.pad function
+    
+    Returns
+    -------
+    x_out (np.ndarray): one-dimensional signal with length `n`
+    """
+    assert len(np.array(x).shape) == 1, "input must be 1D array"
+    assert mode.lower() in ['both', 'start', 'end']
+    n_diff = np.abs(len(x) - n)
+    if len(x) > n:
+        if mode.lower() == 'end':
+            x_out = x[:n]
+        elif mode.lower() == 'start':
+            x_out = x[-n:]
+        else:
+            x_out = x[int(np.floor(n_diff / 2)):-int(np.ceil(n_diff / 2))]
+    else:
+        x_out = x
+    return x_out
 
 
 def pad_or_trim_to_len(x, n, mode='both', kwargs_pad={}):

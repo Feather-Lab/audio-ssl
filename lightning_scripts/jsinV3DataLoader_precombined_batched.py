@@ -539,6 +539,7 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
         self.num_clean = int(batch_size * clean_percentage)
 
         self.signal_augment = signal_augment
+        self.pad_signal = audio_transforms.PadToLen(int(5 * 20_000))
         self.random_crop = audio_transforms.RandomCrop(40000)
         self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000, skip_aug_match=skip_aug_match)
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
@@ -623,6 +624,8 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
                         target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
             
 
+            # center pad signals if too short 
+            source_1, source_2 = self.pad_signal(source_1, source_2)
             # randomly crop clips to be the same length (2 seconds = 40000 samples)
             cropped_11, cropped_21 = self.matched_random_crop(source_1, source_2)
             cropped_12, cropped_22 = self.matched_random_crop(source_1, source_2)

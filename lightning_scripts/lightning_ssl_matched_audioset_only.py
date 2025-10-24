@@ -393,7 +393,7 @@ class LitAudioSSL(L.LightningModule):
         if self.skip_pairing:
             dataset_size // 2 # not including pairing 
         num_devices = self.config['num_gpus']
-        effective_batch_size = self.trainer.accumulate_grad_batches * num_devices
+        effective_batch_size = self.trainer.accumulate_grad_batches * max(num_devices, 1)
         max_estimated_steps = (dataset_size // effective_batch_size) * self.trainer.max_epochs
 
         if self.trainer.max_steps and self.trainer.max_steps < max_estimated_steps and self.trainer.max_steps != -1:
