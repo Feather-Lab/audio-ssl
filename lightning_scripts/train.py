@@ -17,6 +17,7 @@ from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as
 from lightning_ssl import LitAudioSSL 
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
+from lightning_ssl_matched_audioset_only import LitAudioSSL as LitAudioSSLMatchedAudioset
 from lightning_ssl_imagenet import LitImageSSL 
 from lightning_ssl_audioset import LitAudioSetSSL
 
@@ -66,6 +67,9 @@ def cli_main(args):
 
         elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
             module = LitAudioSSLMatched
+
+        elif config['data'].get('dataset', False) == "MatchedAudiosetBatched":
+            module = LitAudioSSLMatchedAudioset
 
         elif config.get('module', None):
             module =  eval(config['module'])

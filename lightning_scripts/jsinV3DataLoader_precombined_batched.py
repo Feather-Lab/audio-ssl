@@ -509,7 +509,172 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
 
         return output_11, output_12, output_21, output_22
 
+class MatchedAudiosetBatched(torch.utils.data.Dataset):
+    def __init__(
+            self,
+            noise_h5_path,
+            low_db=-10,
+            high_db=10,
+            db_spl=60,
+            batch_size=1,
+            transform=None,
+            target_keys=None,
+            blocked_batches=True,
+            signal_augment=False,
+            skip_aug_match=False,
+            clean_percentage=0.0,
+            overfit=False,
+    ):
+        super().__init__()
+        self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
+        self.noise_metadata = pd.read_hdf(noise_h5_path)
+        self.noise_metadata = self.noise_metadata.dropna() ## Removes null label 
 
+        self.num_noise_files = len(self.noise_metadata)
+        self.batch_size = batch_size
+        self.target_keys = target_keys
+        self.blocked_batches = blocked_batches
+        # set params for clean signal sampling 
+        self.clean_percentage = clean_percentage
+        self.num_clean = int(batch_size * clean_percentage)
+
+        self.signal_augment = signal_augment
+        self.random_crop = audio_transforms.RandomCrop(40000)
+        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(40000, skip_aug_match=skip_aug_match)
+        self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
+        self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+        if signal_augment:
+            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(sample_rate=20000, skip_aug_match=skip_aug_match)
+
+
+    def __len__(self):
+        return len(self.noise_metadata) // (2 * self.batch_size)
+    
+    def __getitem__(self, idx):
+        # Modify so batches are not sliding windows over dataset 
+        if self.blocked_batches:
+            start = idx * self.batch_size * 2 
+            end = start + self.batch_size * 2 
+        else:
+            start = idx 
+            end = idx + self.batch_size * 2 
+
+        source_ixs = np.arange(start, end)
+
+        noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
+        noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)
+
+        source = self.noise_files['ndarray_data']['signal'][source_ixs]
+        noise = self.noise_files['ndarray_data']['signal'][noise_ixs]
+        
+        # shuffle the indices of source and noise - externalize for label ix-ing
+        source_batch_ixs = np.random.permutation(source.shape[0])
+        noise_batch_ixs = np.random.permutation(noise.shape[0])
+        
+        output_11, output_12, output_21, output_22 = [], [], [], []
+
+        pos_inf_ixs = None
+        if self.clean_percentage > 0:
+            pos_inf_ixs = np.random.choice(self.batch_size, size=self.num_clean, replace=False)
+
+        if self.target_keys:
+            # track labels of each combo 
+            target_11 = {}
+            target_12 = {}
+            target_21 = {}
+            target_22 = {}
+            
+            for target_key in self.target_keys:
+                for target_set in [target_11, target_12, target_21, target_22]:
+                    target_set[target_key] = []
+                
+        for i in range(self.batch_size):
+            # map batch ix to shuffle ix to make label alignment easy
+            source_1_ix, source_2_ix = source_batch_ixs[i * 2], source_batch_ixs[i * 2 + 1]
+            noise_1_ix, noise_2_ix = noise_batch_ixs[i * 2] , noise_batch_ixs[i * 2 + 1]
+            # get label ixs 
+            source_label_1_ix, source_label_2_ix = source_ixs[source_1_ix], source_ixs[source_2_ix]
+            noise_label_1_ix, noise_label_2_ix = noise_ixs[noise_1_ix], noise_ixs[noise_2_ix]
+
+            # get source example
+            source_1, source_2 = source[source_1_ix], source[source_2_ix]
+            if len(source_1) > len(source_2):
+                source_1, source_2 = source_2, source_1
+                # track ix swap for labeling 
+                source_label_1_ix, source_label_2_ix = source_label_2_ix, source_label_1_ix
+
+            # get noise example 
+            noise_1, noise_2 = self.random_crop(noise[noise_1_ix]), self.random_crop(noise[noise_2_ix])
+            noise_1, noise_2 = torch.tensor(noise_1), torch.tensor(noise_2)
+
+            # store labels if supervised
+            if self.target_keys:
+                for target_key in self.target_keys:
+                    target_type, target_name = target_key.split("/")
+                    if target_type == 'signal':
+                        target_11[target_key].append(self.source_metadata.loc[source_label_1_ix, target_name].item())
+                        target_12[target_key].append(self.source_metadata.loc[source_label_1_ix, target_name].item())
+                        target_21[target_key].append(self.source_metadata.loc[source_label_2_ix, target_name].item())
+                        target_22[target_key].append(self.source_metadata.loc[source_label_2_ix, target_name].item())
+                    elif target_type == 'noise':
+                        target_11[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
+                        target_12[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
+                        target_21[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_1_ix])
+                        target_22[target_key].append(self.noise_files['ndarray_data']['labels_binary_via_int'][noise_label_2_ix])
+            
+
+            # randomly crop clips to be the same length (2 seconds = 40000 samples)
+            cropped_11, cropped_21 = self.matched_random_crop(source_1, source_2)
+            cropped_12, cropped_22 = self.matched_random_crop(source_1, source_2)
+
+            # Apply pitch, tempo, and filtering augments 
+            if self.signal_augment:
+                cropped_11, cropped_21 = self.matched_signal_augment(cropped_11, cropped_21)
+                cropped_12, cropped_22 = self.matched_signal_augment(cropped_12, cropped_22)
+                # hack to kill sox warnings 
+                if idx == 0:
+                    logging.getLogger('sox').setLevel(logging.ERROR)
+
+            cropped_11, cropped_21 = torch.tensor(cropped_11), torch.tensor(cropped_21)
+            cropped_12, cropped_22 = torch.tensor(cropped_12), torch.tensor(cropped_22)
+
+            # if i is in pos inf snr samples, set to None
+            if self.clean_percentage > 0:
+                if i in pos_inf_ixs:
+                    noise_1 = None
+             # randomly mix the source and noise with the same DBSNR
+            combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
+            combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
+
+            # set dB SPL for mixtures 
+            combined_11, _ = self.set_dbSPL(combined_11, None)
+            combined_12, _ = self.set_dbSPL(combined_12, None)
+            combined_21, _ = self.set_dbSPL(combined_21, None)
+            combined_22, _ = self.set_dbSPL(combined_22, None)
+
+            output_11.append(combined_11)
+            output_12.append(combined_12)
+            output_21.append(combined_21)
+            output_22.append(combined_22)
+        
+        output_11 = torch.stack(output_11).float()
+        output_12 = torch.stack(output_12).float()
+        output_21 = torch.stack(output_21).float()
+        output_22 = torch.stack(output_22).float()
+        
+        if self.target_keys:
+            # format targets 
+            for target in [target_11, target_12, target_21 , target_22]:
+                for target_key, target_list in target.items():
+                    if 'noise' in target_key:
+                        target[target_key] = torch.from_numpy(np.stack(target_list, axis=0)).float()
+                    else:
+                        target[target_key] = torch.tensor(target_list)
+        
+            return [output_11, output_12, output_21, output_22], [target_11, target_12, target_21 , target_22]
+
+        return output_11, output_12, output_21, output_22
+    
 
 class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
     def __init__(
