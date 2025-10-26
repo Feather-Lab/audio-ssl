@@ -176,8 +176,7 @@ class SSLBaseModelDualTask(nn.Module):
         ## Assumes same dims for inv and equi tasks 
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv = ProjectionHead(projector_dims)
-        self.g_equi_fg = ProjectionHead(projector_dims)
-        self.g_equi_bg = ProjectionHead(projector_dims)
+        self.g_equi = ProjectionHead(projector_dims)
         if supervised_dropout:
             self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
@@ -193,8 +192,7 @@ class SSLBaseModelDualTask(nn.Module):
         x = self.f(x)
         feature = torch.flatten(x, start_dim=1)
         inv_out = self.g_inv(feature)
-        equi_out = self.g_equi_fg(feature)
-        equi_out = self.g_equi_bg(feature)
+        equi_out = self.g_equi(feature)
         if not self.supervised:
             return feature, (inv_out, equi_out), None 
         else:
@@ -246,8 +244,7 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
         projector_dims = [proj_out_dim] + projector_dims
         self.g_inv_fg = ProjectionHead(projector_dims)
         self.g_inv_bg = ProjectionHead(projector_dims)
-        self.g_equi_fg = ProjectionHead(projector_dims)
-        self.g_equi_bg = ProjectionHead(projector_dims)
+        self.g_equi = ProjectionHead(projector_dims)
         if supervised_dropout:
             self.lin_cls_dropout = nn.Dropout(0.5)
         if supervised:
@@ -264,8 +261,7 @@ class SSLBaseModelDualInvSharedEqui(nn.Module):
         feature = torch.flatten(x, start_dim=1)
         inv_fg_out = self.g_inv_fg(feature)
         inv_bg_out = self.g_inv_bg(feature)
-        equi_out = self.g_equi_fg(feature)
-        equi_out = self.g_equi_bg(feature)
+        equi_out = self.g_equi(feature)
         if not self.supervised:
             return feature, (inv_fg_out, inv_bg_out, equi_out), None 
         else:
