@@ -6,13 +6,14 @@ audio_transforms:
   high_snr: 10
   low_snr: -10
 data:
-  blocked_batches: true
   dataset: MatchedAudiosetBatched
-  noise_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_unbalanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5
+  noise_h5_path: /mnt/home/igriffith/ceph/datasets/audioset/unbalanced_train_segments.hdf5
+  blocked_batches: true
   signal_augment: true
   target_keys:
   - noise/labels_int
   val_noise_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5
+  val_speech_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5
 hparas:
   epochs: 250
   global_batch_size: 640
@@ -43,7 +44,7 @@ model:
     backbone: kell2018
     in_channels: 1
     num_classes:
-      noise/labels_int: 517
+      noise/labels_int: 527
     proj_out_dim: 4096
     projector_dims:
     - 512

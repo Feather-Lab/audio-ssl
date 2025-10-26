@@ -17,7 +17,7 @@ from audio_ssl.misc import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
 # from pprint import pprint
 
-from jsinV3DataLoader_precombined_batched import MatchedAudiosetBatched
+from jsinV3DataLoader_precombined_batched import MatchedAudiosetBatched, MatchedSpeechInNoiseDatasetBatched
 import robustness.audio_functions.audio_transforms as at
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
@@ -330,6 +330,12 @@ class LitAudioSSL(L.LightningModule):
                 view_labels = {}
                 if isinstance(label_set, dict):
                     for key, l in label_set.items():
+                        ## TODO: Sanity check this is right
+                        l = l.squeeze()
+                        l = F.pad(l,
+                                                    (0, 527 - l.shape[-1]),
+                                                    mode='constant',
+                                                    value=0)
                         view_labels[key] = l.squeeze()
                     labels.append(view_labels)
                 else:
@@ -362,19 +368,23 @@ class LitAudioSSL(L.LightningModule):
             collate_fn=self.collate_fn,
             drop_last=True
         )
+        print(f"Rank {self.trainer.local_rank} N training batches {len(train_dataloader)}")
+
         return train_dataloader
     
     def val_dataloader(self):
-        dataset = MatchedAudiosetBatched(
-                                        noise_h5_path=self.config['data']['val_noise_h5_path'],
-                                        low_db=self.config['audio_transforms']['low_snr'],
-                                        high_db=self.config['audio_transforms']['high_snr'],
-                                        db_spl=self.config['audio_transforms']['dbspl'],
-                                        batch_size=self.config['hparas']['batch_size'],
-                                        signal_augment=self.config['data'].get("signal_augment", False),
-                                        skip_aug_match=self.config['data'].get("skip_aug_match", False),
-                                        target_keys=self.config['data'].get("target_keys", None),
-                                        )
+        dataset = MatchedSpeechInNoiseDatasetBatched(
+                                                speech_h5_path=self.config['data']['val_speech_h5_path'],
+                                                noise_h5_path=self.config['data']['val_noise_h5_path'],
+                                                low_db=self.config['audio_transforms']['low_snr'],
+                                                high_db=self.config['audio_transforms']['high_snr'],
+                                                db_spl=self.config['audio_transforms']['dbspl'],
+                                                batch_size=self.config['hparas']['batch_size'],
+                                                signal_augment=self.config['data'].get("signal_augment", False),
+                                                skip_aug_match=self.config['data'].get("skip_aug_match", False),
+                                                target_keys=self.config['data'].get("target_keys", None),
+                                                     )
+        print(dataset)
         dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
@@ -384,7 +394,7 @@ class LitAudioSSL(L.LightningModule):
             # drop_last=True
 
         )
-        print(f"Rank {self.trainer.local_rank} N training batches {len(dataloader)}")
+        print(f"Rank {self.trainer.local_rank} N validation batches {len(dataloader)}")
         return dataloader
 
     # @property
