@@ -141,7 +141,6 @@ class LitAudioSSL(L.LightningModule):
             self.log(f"{step_type}_inv_loss", inv_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
             self.log(f"{step_type}_eq_loss", eq_loss.detach(), on_step=True, on_epoch=False, prog_bar=False, sync_dist=True)
 
-
         else:
             if self.ssl_task == 'word':
                 # group word pairs as augmentations
