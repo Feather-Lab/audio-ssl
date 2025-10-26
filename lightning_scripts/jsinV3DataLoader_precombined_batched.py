@@ -510,6 +510,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
 
         return output_11, output_12, output_21, output_22
 
+
 class MatchedAudiosetBatched(torch.utils.data.Dataset):
     """
     Builds a pytorch hdf5 dataset. Returns signal1, signal2, label if train; signal1, label else
@@ -541,224 +542,238 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.target_keys = target_keys
         self.blocked_batches = blocked_batches
-        # set params for clean signal sampling 
         self.clean_percentage = clean_percentage
         self.num_clean = int(batch_size * clean_percentage)
         self.signal_augment = signal_augment
         self.in_sample_rate = in_sample_rate
         self.out_sample_rate = out_sample_rate
         self.output_dur = int(2 * self.out_sample_rate)
-        self.resample_audio = Resample(
-                                    orig_freq=in_sample_rate,
-                                    new_freq=out_sample_rate
-                                )
-
+        
+        # Initialize audio transforms
+        self.resample_audio = Resample(orig_freq=in_sample_rate, new_freq=out_sample_rate)
         self.pad_signal = audio_transforms.PadToLen(int(5 * self.out_sample_rate))
         self.random_crop = audio_transforms.RandomCrop(self.output_dur)
-        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(self.output_dur, skip_aug_match=skip_aug_match)
+        self.matched_random_crop = audio_transforms.MatchedRandomSignalCrops(
+            self.output_dur, skip_aug_match=skip_aug_match
+        )
         self.matched_combiner = audio_transforms.MatchedCombineWithRandomDBSNR(low_db, high_db)
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
+        
         if signal_augment:
-            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(sample_rate=self.out_sample_rate, skip_aug_match=skip_aug_match)
-
-    def _return_torch(self, x):
-        if isinstance(x, np.ndarray):
-            return torch.from_numpy(x)
-        return x
+            self.matched_signal_augment = audio_transforms.MatchedRandomSignalAugmentSox(
+                sample_rate=self.out_sample_rate, skip_aug_match=skip_aug_match
+            )
 
     def __len__(self):
         return self.num_noise_files // (2 * self.batch_size)
     
-    def _get_example(self,
-                      i, 
-                      source,
-                      noise,
-                      source_batch_ixs,
-                      noise_batch_ixs,
-                      source_ixs,
-                      noise_ixs,
-          ):
+    def _ensure_torch(self, x):
+        """Convert numpy array to torch tensor if needed."""
+        return torch.from_numpy(x) if isinstance(x, np.ndarray) else x
+    
+    def _apply_signal_augmentation(self, signal1, signal2, suppress_warnings=False):
+        """Apply signal augmentation to a pair of signals."""
+        if not self.signal_augment:
+            return signal1, signal2
+        
+        if suppress_warnings:
+            logging.getLogger('sox').setLevel(logging.ERROR)
+        
+        aug1, aug2 = self.matched_signal_augment(signal1.numpy(), signal2.numpy())
+        return self._ensure_torch(aug1), self._ensure_torch(aug2)
+    
+    def _process_signal_pair(self, source1, source2, noise1, noise2, apply_aug=True, suppress_warnings=False):
+        """Process a pair of source signals with noise."""
+        # Ensure shorter signal comes first
+        if len(source1) > len(source2):
+            source1, source2 = source2, source1
+        
+        # Crop noise
+        noise1 = self.random_crop(noise1)
+        noise2 = self.random_crop(noise2)
+        
+        # Pad and crop sources
+        source1, source2 = self.pad_signal(source1, source2)
+        cropped1, cropped2 = self.matched_random_crop(source1, source2)
+        
+        # Apply augmentation
+        if apply_aug:
+            cropped1, cropped2 = self._apply_signal_augmentation(
+                cropped1, cropped2, suppress_warnings
+            )
+        
+        cropped1, cropped2 = self._ensure_torch(cropped1), self._ensure_torch(cropped2)
+        
+        # Combine with noise
+        combined1, combined2 = self.matched_combiner(cropped1, cropped2, noise1, noise2)
+        
+        # Normalize dB SPL
+        combined1, _ = self.set_dbSPL(combined1, None)
+        combined2, _ = self.set_dbSPL(combined2, None)
+        
+        return combined1, combined2
+    
+    def _get_labels(self, source_label_ix, noise_label_ix, target_key):
+        """Get combined labels for source and noise."""
+        target_type, target_name = target_key.split("/")
+        
+        if target_type == 'signal':
+            print(f"WARNING: labels for {target_type} not supported.")
+            print("Silently continuing for now...")
+            return None
+        
+        if target_type == 'noise':
+            source_labels = self.noise_files['labels'][source_label_ix].astype('int')
+            noise_labels = self.noise_files['labels'][noise_label_ix].astype('int')
+            labels = torch.from_numpy(source_labels + noise_labels)
+            return torch.clamp(labels, max=1)
+        
+        return None
+    
+    def _create_targets(self, source_label_1_ix, source_label_2_ix, noise_label_1_ix, noise_label_2_ix):
+        """Create target dictionaries for all four combinations."""
+        if not self.target_keys:
+            return None
+        
+        # Define the four combinations
+        label_combinations = [
+            (source_label_1_ix, noise_label_1_ix),  # target_11
+            (source_label_1_ix, noise_label_2_ix),  # target_12
+            (source_label_2_ix, noise_label_1_ix),  # target_21
+            (source_label_2_ix, noise_label_2_ix),  # target_22
+        ]
+        
+        targets = [{} for _ in range(4)]
+        
+        for target_key in self.target_keys:
+            for target_dict, (src_ix, noise_ix) in zip(targets, label_combinations):
+                labels = self._get_labels(src_ix, noise_ix, target_key)
+                if labels is not None:
+                    target_dict[target_key] = labels
+        
+        return targets
+    
+    def _get_example(self, i, source, noise, source_batch_ixs, noise_batch_ixs, 
+                     source_ixs, noise_ixs):
+        """Generate one example with four combinations."""
+        # Get indices
         source_1_ix, source_2_ix = source_batch_ixs[i * 2], source_batch_ixs[i * 2 + 1]
-        noise_1_ix, noise_2_ix = noise_batch_ixs[i * 2] , noise_batch_ixs[i * 2 + 1]
-        # get label ixs 
-        source_label_1_ix, source_label_2_ix = source_ixs[source_1_ix], source_ixs[source_2_ix]
-        noise_label_1_ix, noise_label_2_ix = noise_ixs[noise_1_ix], noise_ixs[noise_2_ix]
-
-        # get source example
+        noise_1_ix, noise_2_ix = noise_batch_ixs[i * 2], noise_batch_ixs[i * 2 + 1]
+        
+        # Get label indices
+        source_label_1_ix = source_ixs[source_1_ix]
+        source_label_2_ix = source_ixs[source_2_ix]
+        noise_label_1_ix = noise_ixs[noise_1_ix]
+        noise_label_2_ix = noise_ixs[noise_2_ix]
+        
+        # Get signals
         source_1, source_2 = source[source_1_ix], source[source_2_ix]
+        noise_1, noise_2 = noise[noise_1_ix], noise[noise_2_ix]
+        
+        # Swap if source_1 is longer (and swap labels accordingly)
         if len(source_1) > len(source_2):
             source_1, source_2 = source_2, source_1
-        # track ix swap for labeling 
-        source_label_1_ix, source_label_2_ix = source_label_2_ix, source_label_1_ix
-
-        # get noise example 
-        noise_1, noise_2 = self.random_crop(noise[noise_1_ix]), self.random_crop(noise[noise_2_ix])
-        # center pad signals if too short 
-        source_1, source_2 = self.pad_signal(source_1, source_2)
-        # randomly crop clips to be the same length (2 seconds = 40000 samples)
-        cropped_11, cropped_21 = self.matched_random_crop(source_1, source_2)
-        cropped_12, cropped_22 = self.matched_random_crop(source_1, source_2)
-
-        # Apply pitch, tempo, and filtering augments 
-        if self.signal_augment:
-            cropped_11, cropped_21 = self.matched_signal_augment(cropped_11.numpy(), cropped_21.numpy())
-            cropped_12, cropped_22 = self.matched_signal_augment(cropped_12.numpy(), cropped_22.numpy())
-            # hack to kill sox warnings 
-            if i == 0:
-                logging.getLogger('sox').setLevel(logging.ERROR)
-
-        cropped_11, cropped_21 = self._return_torch(cropped_11), self._return_torch(cropped_21)
-        cropped_12, cropped_22 = self._return_torch(cropped_12), self._return_torch(cropped_22)
-
-        # randomly mix the source and noise with the same DBSNR
-        combined_11, combined_21 = self.matched_combiner(cropped_11, cropped_21, noise_1, noise_1)
-        combined_12, combined_22 = self.matched_combiner(cropped_12, cropped_22, noise_2, noise_2)  
-
-        # set dB SPL for mixtures 
-        combined_11, _ = self.set_dbSPL(combined_11, None)
-        combined_12, _ = self.set_dbSPL(combined_12, None)
-        combined_21, _ = self.set_dbSPL(combined_21, None)
-        combined_22, _ = self.set_dbSPL(combined_22, None)
-        # store labels if supervised
-        if self.target_keys:
-            target_11 = {}
-            target_12 = {}
-            target_21 = {}
-            target_22 = {}
-            label_sets = [
-                (target_11, source_label_1_ix, noise_label_1_ix),
-                (target_12, source_label_1_ix, noise_label_2_ix),
-                (target_21, source_label_2_ix, noise_label_1_ix),
-                (target_22, source_label_2_ix, noise_label_2_ix),
-            ]
-            for target_key in self.target_keys:
-                target_type, target_name = target_key.split("/")
-                if target_type == 'signal':
-                    print(f"WARNING: labels for {target_type} not supported.")
-                    print("Silently continuing for now...")
-                    continue 
-                elif target_type == 'noise':
-                    for target_dict, src_label_ixs, noise_label_ixs in label_sets:
-                        # get one hot labels for source 
-                        source_labels = self.noise_files['labels'][src_label_ixs].astype('int')
-                        # get one hot labels for background noise 
-                        noise_labels = self.noise_files['labels'][noise_label_ixs].astype('int')
-                        # combine one hot vectors
-                        labels = torch.from_numpy(source_labels + noise_labels)
-                        # clip to [0,1] so labels still work for task
-                        labels = torch.clamp(labels, max=1)
-                        target_dict[target_key] = labels
-
-            return combined_11, combined_12, combined_21, combined_22, [target_11, target_12, target_21, target_22] 
+            source_label_1_ix, source_label_2_ix = source_label_2_ix, source_label_1_ix
+        
+        # Process both combinations with the same source pair
+        suppress_warnings = (i == 0)  # Only suppress for first iteration
+        
+        combined_11, combined_21 = self._process_signal_pair(
+            source_1, source_2, noise_1, noise_1, 
+            apply_aug=True, suppress_warnings=suppress_warnings
+        )
+        combined_12, combined_22 = self._process_signal_pair(
+            source_1, source_2, noise_2, noise_2, 
+            apply_aug=True, suppress_warnings=False
+        )
+        
+        # Create targets if needed
+        targets = self._create_targets(
+            source_label_1_ix, source_label_2_ix, 
+            noise_label_1_ix, noise_label_2_ix
+        )
+        
+        if targets:
+            return combined_11, combined_12, combined_21, combined_22, targets
         return combined_11, combined_12, combined_21, combined_22
     
     def _screen_batch(self, combined_sigs):
-        if any([sig is None for sig in combined_sigs]):
-            new_ix = np.random.randint(self.batch_size)
-            return new_ix
-        else:
-            return False  
-                
+        """Check if any signals are None and return new index if needed."""
+        if any(sig is None for sig in combined_sigs):
+            return np.random.randint(self.batch_size)
+        return None
+    
     def __getitem__(self, idx):
-        # Modify so batches are not sliding windows over dataset 
+        """Get a batch of examples."""
+        # Determine index range
         if self.blocked_batches:
-            start = idx * self.batch_size * 2 
-            end = start + self.batch_size * 2 
+            start = idx * self.batch_size * 2
+            end = start + self.batch_size * 2
         else:
-            start = idx 
-            end = idx + self.batch_size * 2 
-
+            start = idx
+            end = idx + self.batch_size * 2
+        
         source_ixs = np.arange(start, end)
-
         noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
         noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)
         
-        # load batch of 10 second audio examples
-        source = self.noise_files['wav'][source_ixs]
-        noise = self.noise_files['wav'][noise_ixs]
-
-        # Upsample to 20kHz
-        source = self.resample_audio(torch.from_numpy(source))
-        noise = self.resample_audio(torch.from_numpy(noise))
+        # Load and resample audio
+        source = self.resample_audio(torch.from_numpy(self.noise_files['wav'][source_ixs]))
+        noise = self.resample_audio(torch.from_numpy(self.noise_files['wav'][noise_ixs]))
         
-        # shuffle the indices of source and noise - externalize for label ix-ing
+        # Shuffle indices
         source_batch_ixs = np.random.permutation(source.shape[0])
         noise_batch_ixs = np.random.permutation(noise.shape[0])
         
-        output_11, output_12, output_21, output_22 = [], [], [], []
-
-        pos_inf_ixs = None
-        if self.clean_percentage > 0:
-            pos_inf_ixs = np.random.choice(self.batch_size, size=self.num_clean, replace=False)
-
+        # Initialize output lists
+        outputs = [[] for _ in range(4)]  # output_11, output_12, output_21, output_22
+        
         if self.target_keys:
-            # track labels of each combo 
-            target_11 = {}
-            target_12 = {}
-            target_21 = {}
-            target_22 = {}
-            terget_set_list = [target_11, target_12, target_21, target_22]
-            
-            for target_key in self.target_keys:
-                for target_set in terget_set_list:
-                    target_set[target_key] = []
-                
+            targets = [{key: [] for key in self.target_keys} for _ in range(4)]
+        
+        # Generate batch
         for i in range(self.batch_size):
-            # map batch ix to shuffle ix to make label alignment easy
             batch = self._get_example(
-                                    i,              
-                                    source,
-                                    noise,
-                                    source_batch_ixs,
-                                    noise_batch_ixs,
-                                    source_ixs,
-                                    noise_ixs,
-                                    )
-            # check if any combined signals are None
-            pass_screen = self._screen_batch(batch[:4])
-            if not pass_screen:
-                # re-draw new batch
+                i, source, noise, source_batch_ixs, noise_batch_ixs, 
+                source_ixs, noise_ixs
+            )
+            
+            # Screen and regenerate if needed
+            new_idx = self._screen_batch(batch[:4])
+            if new_idx is not None:
                 batch = self._get_example(
-                                    pass_screen,              
-                                    source,
-                                    noise,
-                                    source_batch_ixs,
-                                    noise_batch_ixs,
-                                    source_ixs,
-                                    noise_ixs,
-                                    )
+                    new_idx, source, noise, source_batch_ixs, noise_batch_ixs,
+                    source_ixs, noise_ixs
+                )
+            
+            # Unpack batch
             if self.target_keys:
-                combined_11, combined_12, combined_21, combined_22, samp_target_keys = batch
+                *combined_signals, batch_targets = batch
             else:
-                combined_11, combined_12, combined_21, combined_22 = batch
-
-            # append combined signals 
-            output_11.append(combined_11)
-            output_12.append(combined_12)
-            output_21.append(combined_21)
-            output_22.append(combined_22)
-
-            # append target keys
-            for target_set, samp_targets in zip(terget_set_list, samp_target_keys):
-                for key in samp_targets.keys():
-                    target_set[key].append(samp_targets[key])
-
-        output_11 = torch.stack(output_11).float()
-        output_12 = torch.stack(output_12).float()
-        output_21 = torch.stack(output_21).float()
-        output_22 = torch.stack(output_22).float()
+                combined_signals = batch
+            
+            # Append signals
+            for output_list, signal in zip(outputs, combined_signals):
+                output_list.append(signal)
+            
+            # Append targets
+            if self.target_keys:
+                for target_dict, batch_target_dict in zip(targets, batch_targets):
+                    for key, value in batch_target_dict.items():
+                        target_dict[key].append(value)
         
+        # Stack outputs
+        output_tensors = [torch.stack(output_list).float() for output_list in outputs]
+        
+        # Stack targets if needed
         if self.target_keys:
-            # format targets 
-            for target in [target_11, target_12, target_21 , target_22]:
-                for target_key, target_list in target.items():
-                    target[target_key] = torch.stack(target_list, dim=0).float()
-
-            #         target[target_key] = torch.(target_list)
+            for target_dict in targets:
+                for key in target_dict:
+                    target_dict[key] = torch.stack(target_dict[key], dim=0).float()
+            
+            return output_tensors, targets
         
-            return [output_11, output_12, output_21, output_22], [target_11, target_12, target_21 , target_22]
-
-        return output_11, output_12, output_21, output_22
+        return tuple(output_tensors)
     
 
 class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
