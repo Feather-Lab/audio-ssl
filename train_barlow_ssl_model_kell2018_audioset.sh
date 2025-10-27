@@ -10,7 +10,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --constraint=h100  # if you want a particular type of GPU
+#SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
 #SBATCH -x workergpu153
 
 mamba activate cochdnn_ssl_pl

@@ -511,6 +511,7 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         return output_11, output_12, output_21, output_22
 
 
+
 class MatchedAudiosetBatched(torch.utils.data.Dataset):
     """
     Builds a pytorch hdf5 dataset. Returns signal1, signal2, label if train; signal1, label else
@@ -535,6 +536,7 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
             in_sample_rate=16_000,
             out_sample_rate=20_000,
             overfit=False,
+            max_retries=10,
     ):
         super().__init__()
         self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
@@ -548,6 +550,7 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
         self.in_sample_rate = in_sample_rate
         self.out_sample_rate = out_sample_rate
         self.output_dur = int(2 * self.out_sample_rate)
+        self.max_retries = max_retries
         
         # Initialize audio transforms
         self.resample_audio = Resample(orig_freq=in_sample_rate, new_freq=out_sample_rate)
@@ -698,13 +701,11 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
         return combined_11, combined_12, combined_21, combined_22
     
     def _screen_batch(self, combined_sigs):
-        """Check if any signals are None and return new index if needed."""
-        if any(sig is None for sig in combined_sigs):
-            return np.random.randint(self.batch_size)
-        return None
+        """Check if any signals are None and return True if resampling needed."""
+        return any(sig is None for sig in combined_sigs)
     
-    def __getitem__(self, idx):
-        """Get a batch of examples."""
+    def _load_sources(self, idx):
+        """Load and resample source audio."""
         # Determine index range
         if self.blocked_batches:
             start = idx * self.batch_size * 2
@@ -714,67 +715,89 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
             end = idx + self.batch_size * 2
         
         source_ixs = np.arange(start, end)
-        noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
-        noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)
-        
-        # Load and resample audio
         source = self.resample_audio(torch.from_numpy(self.noise_files['wav'][source_ixs]))
-        noise = self.resample_audio(torch.from_numpy(self.noise_files['wav'][noise_ixs]))
         
-        # Shuffle indices
-        source_batch_ixs = np.random.permutation(source.shape[0])
-        noise_batch_ixs = np.random.permutation(noise.shape[0])
+        return source, source_ixs
+    
+    def __getitem__(self, idx):
+        """Get a batch of examples."""
+        retry_count = 0
         
-        # Initialize output lists
-        outputs = [[] for _ in range(4)]  # output_11, output_12, output_21, output_22
-        
-        if self.target_keys:
-            targets = [{key: [] for key in self.target_keys} for _ in range(4)]
-        
-        # Generate batch
-        for i in range(self.batch_size):
-            batch = self._get_example(
-                i, source, noise, source_batch_ixs, noise_batch_ixs, 
-                source_ixs, noise_ixs
-            )
+        while retry_count < self.max_retries:
+            # Load sources (may be reloaded on retry)
+            source, source_ixs = self._load_sources(idx)
             
-            # Screen and regenerate if needed
-            new_idx = self._screen_batch(batch[:4])
-            if new_idx is not None:
+            # Load noise (same for all retries)
+            if retry_count == 0:
+                noise_idx = np.random.randint(self.num_noise_files - self.batch_size * 2)
+                noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size * 2)
+                noise = self.resample_audio(torch.from_numpy(self.noise_files['wav'][noise_ixs]))
+            
+            # Shuffle indices
+            source_batch_ixs = np.random.permutation(source.shape[0])
+            noise_batch_ixs = np.random.permutation(noise.shape[0])
+            
+            # Initialize output lists
+            outputs = [[] for _ in range(4)]  # output_11, output_12, output_21, output_22
+            
+            if self.target_keys:
+                targets = [{key: [] for key in self.target_keys} for _ in range(4)]
+            
+            # Flag to track if we need to resample
+            needs_resample = False
+            
+            # Generate batch
+            for i in range(self.batch_size):
                 batch = self._get_example(
-                    new_idx, source, noise, source_batch_ixs, noise_batch_ixs,
+                    i, source, noise, source_batch_ixs, noise_batch_ixs, 
                     source_ixs, noise_ixs
                 )
+                
+                # Check if resampling is needed
+                if self._screen_batch(batch[:4]):
+                    needs_resample = True
+                    break
+                
+                # Unpack batch
+                if self.target_keys:
+                    *combined_signals, batch_targets = batch
+                else:
+                    combined_signals = batch
+                
+                # Append signals
+                for output_list, signal in zip(outputs, combined_signals):
+                    output_list.append(signal)
+                
+                # Append targets
+                if self.target_keys:
+                    for target_dict, batch_target_dict in zip(targets, batch_targets):
+                        for key, value in batch_target_dict.items():
+                            target_dict[key].append(value)
             
-            # Unpack batch
-            if self.target_keys:
-                *combined_signals, batch_targets = batch
-            else:
-                combined_signals = batch
+            # If no resampling needed, we're done
+            if not needs_resample:
+                # Stack outputs
+                output_tensors = [torch.stack(output_list).float() for output_list in outputs]
+                
+                # Stack targets if needed
+                if self.target_keys:
+                    for target_dict in targets:
+                        for key in target_dict:
+                            target_dict[key] = torch.stack(target_dict[key], dim=0).float()
+                    
+                    return output_tensors, targets
+                
+                return tuple(output_tensors)
             
-            # Append signals
-            for output_list, signal in zip(outputs, combined_signals):
-                output_list.append(signal)
-            
-            # Append targets
-            if self.target_keys:
-                for target_dict, batch_target_dict in zip(targets, batch_targets):
-                    for key, value in batch_target_dict.items():
-                        target_dict[key].append(value)
+            # Increment retry counter and resample sources
+            retry_count += 1
+            if retry_count < self.max_retries:
+                # Resample source indices randomly
+                idx = np.random.randint(self.__len__())
         
-        # Stack outputs
-        output_tensors = [torch.stack(output_list).float() for output_list in outputs]
-        
-        # Stack targets if needed
-        if self.target_keys:
-            for target_dict in targets:
-                for key in target_dict:
-                    target_dict[key] = torch.stack(target_dict[key], dim=0).float()
-            
-            return output_tensors, targets
-        
-        return tuple(output_tensors)
-    
+        # If we've exhausted retries, raise an error
+        raise RuntimeError(f"Failed to generate valid batch after {self.max_retries} retries")
+
 
 class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
     def __init__(
