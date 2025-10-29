@@ -511,7 +511,6 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         return output_11, output_12, output_21, output_22
 
 
-
 class MatchedAudiosetBatched(torch.utils.data.Dataset):
     """
     Builds a pytorch hdf5 dataset. Returns signal1, signal2, label if train; signal1, label else
