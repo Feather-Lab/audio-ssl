@@ -167,7 +167,7 @@ class SSLBaseModelDualTask(nn.Module):
                 self.ssl_rep_name = 'layer4'
             if "no_avgpool" in kwargs:
                 self.f.avgpool = nn.Flatten()
-                proj_out_dim = 46592 if 'resnet18' in backbone else 78336
+                proj_out_dim = 46592 if 'resnet18' in backbone else 186368
 
         elif 'kell' in backbone and 'ssl' not in backbone:
             self.f.dropout = nn.Identity()

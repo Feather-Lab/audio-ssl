@@ -9,7 +9,7 @@
 #SBATCH --time=5:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=3,7,11,13,15,18 #0-19 for kell
+#SBATCH --array=3,7,11,13,15,18 #0-19 for all kell; 3,7,11,13,15,18 for just kell acts; 3, 5-9 for ResNet
 
 # module load cuda cudnn nccl
 
@@ -21,30 +21,12 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/audioset_resnet18_MatchedDataset_LARS.yaml \
-#                                    -D /tmp/igriffith -L -1 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/barlow_dualtask_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment_eq_lmbda_5e-1_fixed_loss.yaml \
+
+# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet50_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
 #                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
 #                                    --model_ckpt_dir model_checkpoints \
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml \
-#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_no_avgpool_eq_lmbda_5e-01.yaml \
-#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_8e-01.yaml \
-#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_dual_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_no_shared_fg_augments.yaml \
+python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only_lr_5e-02.yaml \
                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
                                    --model_ckpt_dir model_checkpoints \
-
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/byola_invariant_barlow_lmbda_1e-2_lr_2e-1.yaml \
-#                                    -D /tmp/igriffith -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \

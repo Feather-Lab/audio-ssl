@@ -769,7 +769,7 @@ if __name__ == '__main__':
         module =  eval(config['module']).load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
     elif 'ssl' in config_path.stem:
         module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
-    if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+    if config['data'].get('dataset', False) in ["MatchedSpeechInNoiseDatasetBatched", "MatchedAudiosetBatched"]:
         if config['hparas'].get('ssl_task', False):
             module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         else:
