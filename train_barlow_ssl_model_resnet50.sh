@@ -10,7 +10,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
+#SBATCH --constraint=h100  # if you want a particular type of GPU
 #SBATCH -x workergpu153
 
 mamba activate cochdnn_ssl_pl
@@ -27,14 +27,14 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs visible on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
                                  
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
-                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-                                   --exp_dir model_checkpoints \
-                                   --resume_training 
-                                 
-# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/kell2018_barlow_invariant_lmbda_1e-2_lr_2e-1_jsin_audioset.yaml \
+# srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/resnet50_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
 #                                    --exp_dir model_checkpoints \
 #                                    --resume_training 
+                                 
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/resnet50_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml \
+                                   --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+                                   --exp_dir model_checkpoints \
+                                   --resume_training 
                                  
 
