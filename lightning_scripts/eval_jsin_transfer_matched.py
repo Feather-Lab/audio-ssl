@@ -34,19 +34,10 @@ def cli_main(args):
 
     use_byola = False 
     if 'byol-a' in str(config_path):
+        # init model and hparas dicts  for byola configs 
         config['model'] = {}
         config['hparas'] = {}
-        config['hparas']['task_loss_params'] = {
-            "signal/word_int":
-                {"loss_type": 'crossentropyloss',
-                "weight": 1.0},                       # init loss is ~6.6 
-            "noise/labels_int":
-                {"loss_type": 'bcewithlogitsloss',
-                "weight": 1.0},                      # init loss is ~200 
-            "signal/speaker_int":
-                {"loss_type": 'crossentropyloss',
-                "weight": 1.0}
-            }
+        # init audio transforms and model arch kwargs for byola configs 
         config['audio_transforms'] = {} 
         config['audio_transforms']['low_snr'] = -10
         config['audio_transforms']['high_snr'] = 10
@@ -56,18 +47,18 @@ def cli_main(args):
         config['classifier_layer'] = args.layer_str
         use_byola = True 
 
-    elif args.supervised_backbone:
-        config['hparas']['task_loss_params'] = {
-            "signal/word_int":
-                {"loss_type": 'crossentropyloss',
-                "weight": 1.0},                       # init loss is ~6.6 
-            "noise/labels_int":
-                {"loss_type": 'bcewithlogitsloss',
-                "weight": 1.0},                      # init loss is ~200 
-            "signal/speaker_int":
-                {"loss_type": 'crossentropyloss',
-                "weight": 1.0}
-            }
+    # elif args.supervised_backbone:
+    #     config['hparas']['task_loss_params'] = {
+    #         "signal/word_int":
+    #             {"loss_type": 'crossentropyloss',
+    #             "weight": 1.0},                       # init loss is ~6.6 
+    #         "noise/labels_int":
+    #             {"loss_type": 'bcewithlogitsloss',
+    #             "weight": 1.0},                      # init loss is ~200 
+    #         "signal/speaker_int":
+    #             {"loss_type": 'crossentropyloss',
+    #             "weight": 1.0}
+    #         }
 
 
     # update config for transfer learning task
@@ -106,28 +97,47 @@ def cli_main(args):
         scheduler_str = "_cosine_lr_scheduler_"
 
     if args.task == 'both':
+        # add to model arch kwargs to add classifier head 
         config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794,    
                                     "signal/speaker_int": 433} 
         task_str = f"word_and_speaker_task"
+        # add task loss params to hparas 
+        config['hparas']['task_loss_params'] = {
+            "signal/word_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0},                                       # init loss is ~200 
+            "signal/speaker_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0}
+            }
         
     elif args.task == 'word':
         config['model']['arch_kwargs']['num_classes'] = {"signal/word_int": 794} 
         task_str = f"word_task"
+        # add task loss params to hparas 
+        config['hparas']['task_loss_params'] = {
+            "signal/word_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0}
+            }
 
     elif args.task == 'speaker':
         config['model']['arch_kwargs']['num_classes'] = {"signal/speaker_int": 433} 
         task_str = f"speaker_task"
+        # add task loss params to hparas 
+        config['hparas']['task_loss_params'] = {
+            "signal/speaker_int":
+                {"loss_type": 'crossentropyloss',
+                "weight": 1.0}
+            }
     
 
     ## update target keys 
     config['data']['target_keys'] = list(config['model']['arch_kwargs']['num_classes'].keys())
     print(f"Running {task_str} transfer")
     
-
-    config['hparas']['task_loss_params'] = {key:value for key,value in config['hparas']['task_loss_params'].items() if key in config['model']['arch_kwargs']['num_classes'].keys()}
-
-    print(config['hparas']['task_loss_params'] )
-    print(config['model']['arch_kwargs'] )
+    print(f"hparas config: {config['hparas']}")
+    print(f"model config: {config['model']['arch_kwargs']}")
 
     if args.w_mlp:
         config['model']['classifier'] = {}

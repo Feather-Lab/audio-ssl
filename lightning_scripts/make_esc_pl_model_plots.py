@@ -757,8 +757,9 @@ if __name__ == '__main__':
 
     if args.ckpt_path == "":
         checkpoint_dir = Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-        ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        ckpt_path = ckpt_paths[-1] # get latest checkpoint 
+        # ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+        # ckpt_path = ckpt_paths[-1] # get latest checkpoint 
+        ckpt_path = list(checkpoint_dir.glob("*best_val*.ckpt"))[-1]
         print(ckpt_path)
         ckpt_str = ''
     else:
