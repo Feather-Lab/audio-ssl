@@ -4,7 +4,7 @@ import lightning as L
 import re
 from typing import Union
 from lightning_ssl import LitAudioSSL 
-from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
+from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitAudioSupervised
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
@@ -23,7 +23,7 @@ class SSLClassifier(L.LightningModule):
         # init the pretrained LightningModule
         # Set strict to false to ignore loading in pre-trained classifier 
         if supervised_backbone:
-            self.feature_extractor = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
+            self.feature_extractor = LitAudioSupervised.load_from_checkpoint(checkpoint_path=ckpt_path, config=config, strict=False).eval()
             self.config['model']['arch_kwargs']['backbone'] = config['model']['arch_name']
 
         else:

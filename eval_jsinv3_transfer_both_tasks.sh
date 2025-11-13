@@ -24,25 +24,6 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/resnet18_barlow_invariant_only_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'layer2' \
-#                                    --optimizer "AdamW" --lr 0.01 \
-#                                    --task 'word' \
-#                                    --train_epochs 6 \
-#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout
-
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_w_invar_augment_no_avgpool_eq_lmbda_3e-01.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'layer2' \
-#                                    --optimizer "AdamW" --lr 0.01 \
-#                                    --task 'word' \
-#                                    --train_epochs 6 \
-#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_list_path train_config_manifests/kell2018_barlow_equivariant_lmbda_search_w_augments.pkl \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
@@ -55,7 +36,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/kell2018_barlow_invariant_lmbda_1e-2_lr_2e-1_audioset_only.yaml \
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
@@ -63,5 +44,5 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                    --optimizer "AdamW" --lr 0.0005 \
                                    --task 'both' \
                                    --train_epochs 6 \
-                                   --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                    
