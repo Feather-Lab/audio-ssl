@@ -137,19 +137,32 @@ class SSLClassifier(L.LightningModule):
             if self.no_avgpool:
                 layer_size_dict['avgpool'] = layer_size_dict['layer4']
         else:
-            # TODO - get shapes for resnet50 
-            layer_size_dict = {'input_after_preproc': 211,
-                                'conv1': 6784,
-                                'bn1': 6784,
-                                'conv1_relu1': 6784,
-                                'maxpool1': 3392,
-                                'layer1': 13568,
-                                'layer2': 13824,
-                                'layer3': 14336,
-                                'layer4': 14336,
-                                'avgpool': 2048,
-                                'final': 2048}
-        
+            if self.time_avg_rep:
+                layer_size_dict = {'input_after_preproc': 211,
+                                    'conv1': 6784,
+                                    'bn1': 6784,
+                                    'conv1_relu1': 6784,
+                                    'maxpool1': 3392,
+                                    'layer1': 3392,
+                                    'layer2': 3456,
+                                    'layer3': 3584,
+                                    'layer4': 3584,
+                                    'avgpool': 2048,
+                                    'final': 2048}
+            else:
+                layer_size_dict = {'input_after_preproc': 82290,
+                                    'conv1': 1322880,
+                                    'bn1': 1322880,
+                                    'conv1_relu1': 1322880,
+                                    'maxpool1': 332416,
+                                    'layer1': 332416,
+                                    'layer2': 169344,
+                                    'layer3': 89600,
+                                    'layer4': 186368,
+                                    'avgpool': 2048,
+                                    'final': 2048}
+                if self.no_avgpool:
+                    layer_size_dict['avgpool'] = layer_size_dict['layer4']
         proj_out_dim = layer_size_dict[layer_out]
         # init trainable word classifier  
         num_classes = config['model']['arch_kwargs']['num_classes']
