@@ -36,6 +36,6 @@ srun -K python3 -u lightning_scripts/run_param_decoding_sep_db_and_filter.py  \
                                    --num_eval 10 \
                                    --num_train 50 \
                                    --job_id $SLURM_ARRAY_TASK_ID \
-                                   --invar_model_config model_configs/barlow_word_kell2018_base_Matched_blocked_batches_lmbda_1e-2_lr_2e-1_w_augment.yaml \
-                                   --equi_model_config model_configs/kell2018_dual_barlow_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_no_shared_fg_augments.yaml \
+                                   --invar_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
+                                   --equi_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml \
                                    --ridge_alpha 0.5

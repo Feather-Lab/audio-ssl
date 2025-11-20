@@ -22,7 +22,7 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/resnet50_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
                                 #    --dir_name_modifier "latest_ckpt"
 
 
