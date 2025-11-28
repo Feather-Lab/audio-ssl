@@ -10,6 +10,7 @@ from argparse import ArgumentParser, BooleanOptionalAction
 
 from lightning_ssl_classifier import SSLClassifier
 from lightning_byola_classifier import BYOLAClassifier
+from whisper_transfer_module import WhisperTransferModule
 from jsinV3DataLoader_precombined_batched import CleanSpeechInNoiseValDatasetBatched
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
@@ -22,18 +23,71 @@ torch.backends.cudnn.allow_tf32 = True
 def cli_main(args):
     L.seed_everything(args.random_seed)
     
+    # Load config
     if args.config_path != "":
         config_path = pathlib.Path(args.config_path)
+        config_path_lower = args.config_path.lower()
+
+        # Handle whisper configs specified by name (e.g., "whisper_large-v3-turbo") even if file is missing
+        if config_path_lower == 'whisper' or ('whisper' in config_path_lower):
+            config = {}
+        else:
+            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     elif args.config_list_path != "":
         with open(args.config_list_path, 'rb') as f:
             config_dict = pickle.load(f)
             config_path = pathlib.Path(config_dict[args.array_ix])
+            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+    else:
+        raise ValueError("Must provide either config_path or config_list_path")
 
     print(f"Evaluating config: {config_path}")
-    config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
-
-    use_byola = False 
-    if 'byol-a' in str(config_path):
+    
+    # Determine which model type to use
+    use_whisper = False
+    use_byola = False
+    
+    if args.model_type == 'whisper' or 'whisper' in str(config_path).lower():
+        use_whisper = True
+    
+    if use_whisper:
+        # Initialize config structure for Whisper if needed
+        if 'model' not in config:
+            config['model'] = {}
+        if 'hparas' not in config:
+            config['hparas'] = {}
+        if 'data' not in config:
+            config['data'] = {}
+        if 'arch_kwargs' not in config['model']:
+            config['model']['arch_kwargs'] = {}
+        
+        # Extract whisper model type from config_path (e.g., "whisper_large-v3-turbo" -> "large-v3-turbo")
+        # Only extract if not already set in config
+        if 'whisper_model' not in config['model']:
+            config_path_str = str(config_path)
+            whisper_model_type = 'large-v3-turbo'  # default
+            if 'whisper_' in config_path_str:
+                # Extract model type after "whisper_"
+                parts = config_path_str.split('whisper_')
+                model_part = parts[1]
+                whisper_model_type = model_part
+            # Set whisper_model in config
+            config['model']['whisper_model'] = whisper_model_type
+        
+        # Convert layer_str to integer for Whisper encoder layer
+        # Try eval() first (in case it's a Python expression), then fall back to int()
+        try:
+            encoder_layer = eval(args.layer_str)
+            if not isinstance(encoder_layer, int):
+                encoder_layer = int(args.layer_str)
+        except (ValueError, SyntaxError, NameError):
+            try:
+                encoder_layer = int(args.layer_str)
+            except ValueError:
+                raise ValueError(f"layer_str must be convertible to an integer for Whisper model, got: {args.layer_str}")
+        config['model']['arch_kwargs']['encoder_layer'] = encoder_layer
+        config['model']['arch_kwargs']['time_average'] = False  # Whisper doesn't use time_average
+    elif 'byol-a' in str(config_path):
         # init model and hparas dicts  for byola configs 
         config['model'] = {}
         config['hparas'] = {}
@@ -55,8 +109,13 @@ def cli_main(args):
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
     # used 2 gpus for training, mult by 2 for now to get same checkpoint 
-    if not args.supervised_backbone:
-        config['model']['arch_kwargs']['supervised'] =  False
+    if not use_whisper:  # Whisper doesn't use supervised_backbone flag
+        if 'model' not in config:
+            config['model'] = {}
+        if 'arch_kwargs' not in config['model']:
+            config['model']['arch_kwargs'] = {}
+        if not args.supervised_backbone:
+            config['model']['arch_kwargs']['supervised'] = False
 
     config['with_noise'] = args.with_noise
     # don't load in classifier head if it exists 
@@ -64,7 +123,8 @@ def cli_main(args):
     config['hparas']['epochs'] = args.train_epochs
     if 'arch_kwargs' not in config['model'].keys():
         config['model']['arch_kwargs'] = {}
-    config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
+    if not use_whisper:  # Whisper doesn't use time_average
+        config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['crop_audio'] = args.crop_audio
 
     crop_audio_str = ""
@@ -157,7 +217,9 @@ def cli_main(args):
     str_modifier = f"{task_str}_{args.layer_str.replace('.', '_')}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}{dropout_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
-    if use_byola:
+    if use_whisper:
+        module = WhisperTransferModule(config=config, ckpt_path=None)
+    elif use_byola:
         module = BYOLAClassifier(config=config)
     else:
         module = SSLClassifier(config=config,
@@ -197,7 +259,14 @@ def cli_main(args):
     callbacks.append(lr_monitor)
     # callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
 
-    log_basename = 'byol-a_base' if use_byola else config_path.stem
+    if use_whisper:
+        # Use the whisper model type from config (e.g., "large-v3-turbo")
+        whisper_model_type = config['model'].get('whisper_model', 'large-v3-turbo')
+        log_basename = f'whisper_{whisper_model_type}'
+    elif use_byola:
+        log_basename = 'byol-a_base'
+    else:
+        log_basename = config_path.stem
 
     wandb_logger = WandbLogger(save_dir=checkpoint_dir, 
                                name=f"{log_basename}_classifier_{str_modifier}",
@@ -238,7 +307,12 @@ def cli_main(args):
             labels[label_key] = torch.from_numpy(targets[label_key])
         return audio, labels
 
-    eval_collate_fn = module.predict_collate_fn if 'byol-a' in str(config_path) else eval_collate_fn
+    if use_whisper:
+        eval_collate_fn = module.eval_collate_fn
+    elif 'byol-a' in str(config_path):
+        eval_collate_fn = module.predict_collate_fn
+    else:
+        eval_collate_fn = eval_collate_fn
 
     eval_speech_h5_path = '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/train_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
 
@@ -314,6 +388,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('--config_path', default='', type=str, help='Path to experiment config.')
     parser.add_argument('--config_list_path', default='', type=str, help='Path to experiment config.')
+    parser.add_argument('--model_type', default='', type=str, help='Model type: "whisper", "byola", or "ssl" (auto-detected if not specified).')
     parser.add_argument(
         "--results_dir",
         default=pathlib.Path("./eval_jsin_results"),
