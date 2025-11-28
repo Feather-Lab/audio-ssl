@@ -47,20 +47,6 @@ def cli_main(args):
         config['classifier_layer'] = args.layer_str
         use_byola = True 
 
-    # elif args.supervised_backbone:
-    #     config['hparas']['task_loss_params'] = {
-    #         "signal/word_int":
-    #             {"loss_type": 'crossentropyloss',
-    #             "weight": 1.0},                       # init loss is ~6.6 
-    #         "noise/labels_int":
-    #             {"loss_type": 'bcewithlogitsloss',
-    #             "weight": 1.0},                      # init loss is ~200 
-    #         "signal/speaker_int":
-    #             {"loss_type": 'crossentropyloss',
-    #             "weight": 1.0}
-    #         }
-
-
     # update config for transfer learning task
     config['num_workers'] = args.num_workers
     config['num_gpus'] = args.gpus
