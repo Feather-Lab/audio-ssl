@@ -6,7 +6,7 @@ from typing import Union
 import whisper 
 import numpy as np
 import torchaudio
-from .jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
+from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 import robustness.audio_functions.audio_transforms as at

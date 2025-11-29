@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
 
-#SBATCH --mem=32Gb ## Just 32 if evaling 
+#SBATCH --mem=64Gb ## Just 32 if evaling 
 #SBATCH --time=1-01:00:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
 ##SBATCH --time=00:12:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
