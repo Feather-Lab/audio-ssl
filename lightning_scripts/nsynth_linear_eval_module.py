@@ -7,11 +7,12 @@ Trains a linear classifier on top of frozen SSL feature extractors for NSynth ta
 import torch
 import torch.nn as nn
 import lightning as L
-from typing import Union
+from typing import Union, Optional
 from lightning_ssl_classifier import SSLClassifier
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import torch.nn.functional as F
+from nsynth_dataset import NsynthDataset
 
 
 class NSynthLinearEvalModule(L.LightningModule):
@@ -31,6 +32,11 @@ class NSynthLinearEvalModule(L.LightningModule):
         w_mlp=False,
         mlp_dim=512,
         with_dropout=False,
+        nsynth_root: str = "/mnt/home/igriffith/ceph/datasets/nsynth",
+        task: str = "family",
+        label_field: Optional[str] = None,
+        duration: Optional[float] = None,
+        fade_window_duration: float = 0.01,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -40,11 +46,25 @@ class NSynthLinearEvalModule(L.LightningModule):
         self.w_mlp = w_mlp
         self.mlp_dim = mlp_dim
         self.with_dropout = with_dropout
+        self.nsynth_root = nsynth_root
+        self.task = task
+        self.label_field = label_field
+        self.duration = duration
+        self.fade_window_duration = fade_window_duration
         
-        # Create a dummy config for SSLClassifier that matches our needs
+        # Create a config for SSLClassifier that matches our needs
         # We'll override the classifier head
-        ssl_config = config.copy()
+        import copy
+        ssl_config = copy.deepcopy(config)  # Deep copy to avoid modifying original config
+        # Ensure arch_kwargs exists (may have been converted from arch_params in eval_nsynth_linear.py)
+        if 'arch_kwargs' not in ssl_config['model']:
+            ssl_config['model']['arch_kwargs'] = {}
         ssl_config['model']['arch_kwargs']['num_classes'] = num_classes  # Single task
+        # For supervised models, ensure arch_params is preserved for checkpoint loading
+        # (arch_kwargs is used for SSLClassifier internal logic, arch_params for model loading)
+        if supervised_backbone and 'arch_params' not in ssl_config['model'] and 'arch_kwargs' in ssl_config['model']:
+            # Restore arch_params from arch_kwargs for supervised model loading
+            ssl_config['model']['arch_params'] = copy.deepcopy(ssl_config['model']['arch_kwargs'])
         
         # Initialize SSLClassifier for feature extraction
         self.feature_extractor_wrapper = SSLClassifier(
@@ -91,9 +111,24 @@ class NSynthLinearEvalModule(L.LightningModule):
     
     def _get_feature_dim(self) -> int:
         """Get feature dimension based on layer_out and architecture."""
-        backbone = self.config['model']['arch_kwargs'].get('backbone', '')
-        time_avg_rep = self.config['model']['arch_kwargs'].get('time_average', True)
-        no_avgpool = self.config['model']['arch_kwargs'].get('no_avgpool', False)
+        # Handle both arch_kwargs and arch_params (for supervised models)
+        arch_config = self.config['model'].get('arch_kwargs', {})
+        if not arch_config and 'arch_params' in self.config['model']:
+            arch_config = self.config['model']['arch_params']
+        
+        # Try to get backbone from arch_kwargs, or infer from arch_name
+        backbone = arch_config.get('backbone', '')
+        if not backbone:
+            arch_name = self.config['model'].get('arch_name', '')
+            if 'kell2018' in arch_name:
+                backbone = 'kell2018'
+            elif 'resnet18' in arch_name or 'resnet_multi_task18' in arch_name:
+                backbone = 'resnet18'
+            elif 'resnet' in arch_name:
+                backbone = 'resnet50'
+        
+        time_avg_rep = arch_config.get('time_average', True)
+        no_avgpool = arch_config.get('no_avgpool', False)
         
         if backbone == 'kell2018' or 'kell2018' in str(backbone):
             if time_avg_rep:
@@ -371,4 +406,42 @@ class NSynthLinearEvalModule(L.LightningModule):
     def compute_warmup(self, num_training_steps: int, num_warmup_steps: Union[int, float]) -> int:
         """Compute warmup steps."""
         return num_warmup_steps * num_training_steps if isinstance(num_warmup_steps, float) else num_warmup_steps
+    
+    def train_dataloader(self):
+        """Create training dataloader."""
+        train_dataset = NsynthDataset(
+            nsynth_root=self.nsynth_root,
+            split='train',
+            task=self.task,
+            label_field=self.label_field if self.task == 'other' else None,
+            sample_rate=20000,  # Match existing models
+            duration=self.duration,
+            fade_window_duration=self.fade_window_duration,
+        )
+        return torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=self.config['hparas']['batch_size'],
+            shuffle=True,
+            num_workers=self.config.get('num_workers', 4),
+            pin_memory=True,
+        )
+    
+    def val_dataloader(self):
+        """Create validation dataloader."""
+        val_dataset = NsynthDataset(
+            nsynth_root=self.nsynth_root,
+            split='valid',
+            task=self.task,
+            label_field=self.label_field if self.task == 'other' else None,
+            sample_rate=20000,  # Match existing models
+            duration=self.duration,
+            fade_window_duration=self.fade_window_duration,
+        )
+        return torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=self.config['hparas']['batch_size'],
+            shuffle=False,
+            num_workers=self.config.get('num_workers', 4),
+            pin_memory=True,
+        )
 

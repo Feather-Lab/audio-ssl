@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=64Gb ## Just 32 if evaling 
-#SBATCH --time=1-01:00:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
+#SBATCH --time=2-01:00:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
 ##SBATCH --time=00:12:00 # approx 20 (~3hr/epoch) if training classifier from scratch. 10 min if just evaling
 #SBATCH --partition=gpu
 #SBATCH -N 1
@@ -33,5 +33,6 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path whisp
                                    --optimizer "AdamW" --lr 0.0005 \
                                    --task 'both' \
                                    --train_epochs 6 \
+                                   --checkpoint_every_n_steps 2000 \
                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                    

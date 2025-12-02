@@ -246,14 +246,18 @@ def cli_main(args):
         
 
     callbacks=[]
-    callbacks.append(ModelCheckpoint(
-            classifier_checkpoint_dir,
-            monitor="train_loss",
-            mode="min",
-            save_top_k=1,
-            save_weights_only=True,
-            verbose=True,
-        ))
+    checkpoint_callback = ModelCheckpoint(
+        classifier_checkpoint_dir,
+        monitor="train_loss",
+        mode="min",
+        save_top_k=1,
+        save_weights_only=True,
+        verbose=True,
+    )
+    # Add incremental checkpointing if specified
+    if args.checkpoint_every_n_steps is not None and args.checkpoint_every_n_steps > 0:
+        checkpoint_callback.every_n_train_steps = args.checkpoint_every_n_steps
+    callbacks.append(checkpoint_callback)
     
     lr_monitor = LearningRateMonitor(logging_interval='step')
     callbacks.append(lr_monitor)
@@ -449,6 +453,12 @@ if __name__ == "__main__":
     parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     parser.add_argument('--train_epochs', default=3, type=int, help='Number of training epochs.')
+    parser.add_argument(
+        '--checkpoint_every_n_steps',
+        default=None,
+        type=int,
+        help='Checkpoint every N training steps (incremental checkpointing). If None, only checkpoint at end of epochs. (Default: None)'
+    )
     args = parser.parse_args()
 
     cli_main(args)

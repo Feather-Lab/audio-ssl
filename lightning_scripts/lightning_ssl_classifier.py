@@ -199,8 +199,13 @@ class SSLClassifier(L.LightningModule):
                                                     #   reduction='none'
                                                     )
 
-        self.accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
-                        for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()}) 
+        # Initialize accuracy metrics - handle both single-task (int) and multi-task (dict) cases
+        if isinstance(num_classes, dict):
+            self.accuracy = torch.nn.ModuleDict({task_key: BinaryPrecision() if 'noise' in task_key else Accuracy(task="multiclass", num_classes=num_classes) 
+                            for task_key,num_classes in self.config['model']['arch_kwargs']['num_classes'].items()})
+        else:
+            # Single-task case (e.g., NSynth) - create accuracy metric with correct number of classes
+            self.accuracy = Accuracy(task="multiclass", num_classes=num_classes) 
     
     # setup activation hook for byol-a architecture
 

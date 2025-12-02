@@ -48,10 +48,41 @@ def cli_main(args):
     
     if 'model' not in config:
         config['model'] = {}
-    if 'arch_kwargs' not in config['model']:
-        config['model']['arch_kwargs'] = {}
     
-    if not args.supervised_backbone:
+    # Handle supervised models (use arch_params) vs SSL models (use arch_kwargs)
+    if args.supervised_backbone:
+        # Supervised models use arch_params for checkpoint loading, but SSLClassifier needs arch_kwargs
+        # Keep both: arch_params for model loading, arch_kwargs for SSLClassifier internal logic
+        if 'arch_params' in config['model']:
+            if 'arch_kwargs' not in config['model']:
+                config['model']['arch_kwargs'] = {}
+            # Copy arch_params to arch_kwargs (but keep arch_params for checkpoint loading)
+            import copy
+            for key, value in config['model']['arch_params'].items():
+                if key not in config['model']['arch_kwargs']:
+                    # Deep copy to avoid modifying the original arch_params
+                    if isinstance(value, dict):
+                        config['model']['arch_kwargs'][key] = copy.deepcopy(value)
+                    else:
+                        config['model']['arch_kwargs'][key] = value
+            # Extract backbone from arch_name for supervised models
+            arch_name = config['model'].get('arch_name', '')
+            if 'kell2018' in arch_name:
+                config['model']['arch_kwargs']['backbone'] = 'kell2018'
+            elif 'resnet' in arch_name:
+                # Extract resnet type from arch_name
+                if 'resnet18' in arch_name or 'resnet_multi_task18' in arch_name:
+                    config['model']['arch_kwargs']['backbone'] = 'resnet18'
+                else:
+                    config['model']['arch_kwargs']['backbone'] = 'resnet50'
+        else:
+            # If no arch_params, create arch_kwargs from scratch
+            if 'arch_kwargs' not in config['model']:
+                config['model']['arch_kwargs'] = {}
+    else:
+        # SSL models use arch_kwargs
+        if 'arch_kwargs' not in config['model']:
+            config['model']['arch_kwargs'] = {}
         config['model']['arch_kwargs']['supervised'] = False
     
     config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
@@ -69,6 +100,21 @@ def cli_main(args):
     )
     num_classes = train_dataset.num_classes
     print(f"NSynth task '{args.task}': {num_classes} classes")
+    
+    # Set num_classes in config for SSLClassifier
+    config['model']['arch_kwargs']['num_classes'] = num_classes
+    
+    # Set task_loss_params for single-task NSynth classification
+    # SSLClassifier requires task_loss_params even for single-task scenarios
+    task_key = f"nsynth/{args.task}"
+    if 'hparas' not in config:
+        config['hparas'] = {}
+    config['hparas']['task_loss_params'] = {
+        task_key: {
+            'loss_type': 'crossentropyloss',
+            'weight': 1.0
+        }
+    }
     
     # Get checkpoint for SSL model
     checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
@@ -122,6 +168,11 @@ def cli_main(args):
         w_mlp=args.w_mlp,
         mlp_dim=args.mlp_dim,
         with_dropout=args.with_dropout,
+        nsynth_root=args.nsynth_root,
+        task=args.task,
+        label_field=args.label_field if args.task == 'other' else None,
+        duration=args.duration,
+        fade_window_duration=args.fade_window_duration,
     )
     
     # Check if existing classifier checkpoint exists
