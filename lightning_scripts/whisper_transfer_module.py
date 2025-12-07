@@ -298,36 +298,22 @@ class WhisperTransferModule(L.LightningModule):
         return mel, labels  
 
     def eval_collate_fn(self, batch):
-        batch = batch[0] # unbox wrapper added by dataloader 
-        signals = []
-        labels = batch[-1] # labels already collated 
-
+        audio, targets = batch[0] # unbox wrapper added by dataloader 
         # convert labels to torch tensors 
-        if isinstance(labels, dict):
-            for task_key, task_labels in labels.items():
+        labels = {}
+        if isinstance(targets, dict):
+            for task_key, task_labels in targets.items():
                 labels[task_key] = torch.from_numpy(task_labels)
         else:
-            labels = torch.from_numpy(labels) 
-        # Only fit on clean targets 
-        for (signal, noise) in  zip(*batch[:2]):
-            # use transforms pre-defined in feature_extractor - None instead of noise to skip
-            signal, _ = self.test_transforms(signal, None)
-            if signal is None:
-                # Signal was none & has null label class 
-                signal = torch.zeros(1,40000)
-            # Resample to 16kHz for Whisper (assuming input is 20kHz)
-            signal = self.resample_audio(signal.unsqueeze(0)).squeeze(0)
-            signals.append(signal)
-        
-        # Stack signals: (batch, time)
-        signals = torch.cat(signals, dim=0)  # (batch, time)
-        
+            labels = torch.from_numpy(targets) 
+
+        # resample audio to 16kHz    
+        audio = self.resample_audio(audio)
         # Process batch through Whisper preprocessing
         # Pad or trim to 30 seconds (480000 samples at 16kHz)
-        signals = whisper.pad_or_trim(signals)
-        
+        audio = whisper.pad_or_trim(audio)
         # Convert to mel spectrogram (batch processing)
-        mel = whisper.log_mel_spectrogram(signals, n_mels=self.n_mels)
+        mel = whisper.log_mel_spectrogram(audio, n_mels=self.n_mels)
         
         return mel, labels  
 

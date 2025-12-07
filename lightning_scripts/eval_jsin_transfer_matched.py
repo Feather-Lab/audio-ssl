@@ -285,7 +285,7 @@ def cli_main(args):
         devices=args.gpus,
         accelerator="gpu", 
         strategy='ddp' if args.gpus > 1 else 'auto',
-        # val_check_interval = 2000, 
+        val_check_interval = args.checkpoint_every_n_steps, 
         # limit_train_batches=2,
         # limit_val_batches=2,
         gradient_clip_val=1, # clipt grad l2 norm to 1 
