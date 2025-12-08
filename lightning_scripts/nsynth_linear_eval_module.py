@@ -7,6 +7,7 @@ Trains a linear classifier on top of frozen SSL feature extractors for NSynth ta
 import torch
 import torch.nn as nn
 import lightning as L
+import whisper
 from typing import Union, Optional
 from lightning_ssl_classifier import SSLClassifier
 from audio_ssl.misc import LARS, CosineWarmupScheduler
@@ -37,6 +38,8 @@ class NSynthLinearEvalModule(L.LightningModule):
         label_field: Optional[str] = None,
         duration: Optional[float] = None,
         fade_window_duration: float = 0.01,
+        sample_rate: int = 20000,
+        use_whisper: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -51,31 +54,44 @@ class NSynthLinearEvalModule(L.LightningModule):
         self.label_field = label_field
         self.duration = duration
         self.fade_window_duration = fade_window_duration
+        self.sample_rate = sample_rate
         
-        # Create a config for SSLClassifier that matches our needs
-        # We'll override the classifier head
-        import copy
-        ssl_config = copy.deepcopy(config)  # Deep copy to avoid modifying original config
-        # Ensure arch_kwargs exists (may have been converted from arch_params in eval_nsynth_linear.py)
-        if 'arch_kwargs' not in ssl_config['model']:
-            ssl_config['model']['arch_kwargs'] = {}
-        ssl_config['model']['arch_kwargs']['num_classes'] = num_classes  # Single task
-        # For supervised models, ensure arch_params is preserved for checkpoint loading
-        # (arch_kwargs is used for SSLClassifier internal logic, arch_params for model loading)
-        if supervised_backbone and 'arch_params' not in ssl_config['model'] and 'arch_kwargs' in ssl_config['model']:
-            # Restore arch_params from arch_kwargs for supervised model loading
-            ssl_config['model']['arch_params'] = copy.deepcopy(ssl_config['model']['arch_kwargs'])
+        # Track encoder type
+        if 'model' not in self.config:
+            self.config['model'] = {}
+        if 'arch_kwargs' not in self.config['model']:
+            self.config['model']['arch_kwargs'] = {}
+        self.use_whisper = use_whisper or bool(self.config['model'].get('whisper_model'))
         
-        # Initialize SSLClassifier for feature extraction
-        self.feature_extractor_wrapper = SSLClassifier(
-            config=ssl_config,
-            ckpt_path=ckpt_path,
-            layer_out=layer_out,
-            supervised_backbone=supervised_backbone
-        )
-        
-        # Get feature dimension from the wrapper's layer size dict logic
-        feature_dim = self._get_feature_dim()
+        if self.use_whisper:
+            self._init_whisper_encoder()
+            feature_dim = self.classifier_input_dim
+            self.feature_extractor_wrapper = None
+        else:
+            # Create a config for SSLClassifier that matches our needs
+            # We'll override the classifier head
+            import copy
+            ssl_config = copy.deepcopy(config)  # Deep copy to avoid modifying original config
+            # Ensure arch_kwargs exists (may have been converted from arch_params in eval_nsynth_linear.py)
+            if 'arch_kwargs' not in ssl_config['model']:
+                ssl_config['model']['arch_kwargs'] = {}
+            ssl_config['model']['arch_kwargs']['num_classes'] = num_classes  # Single task
+            # For supervised models, ensure arch_params is preserved for checkpoint loading
+            # (arch_kwargs is used for SSLClassifier internal logic, arch_params for model loading)
+            if supervised_backbone and 'arch_params' not in ssl_config['model'] and 'arch_kwargs' in ssl_config['model']:
+                # Restore arch_params from arch_kwargs for supervised model loading
+                ssl_config['model']['arch_params'] = copy.deepcopy(ssl_config['model']['arch_kwargs'])
+            
+            # Initialize SSLClassifier for feature extraction
+            self.feature_extractor_wrapper = SSLClassifier(
+                config=ssl_config,
+                ckpt_path=ckpt_path,
+                layer_out=layer_out,
+                supervised_backbone=supervised_backbone
+            )
+            
+            # Get feature dimension from the wrapper's layer size dict logic
+            feature_dim = self._get_feature_dim()
         
         # Build classifier head
         self.mlp = None
@@ -108,6 +124,47 @@ class NSynthLinearEvalModule(L.LightningModule):
         
         # Loss
         self.criterion = nn.CrossEntropyLoss()
+    
+    def _init_whisper_encoder(self):
+        """Initialize Whisper encoder components."""
+        whisper_model_name = self.config['model'].get('whisper_model', 'large-v3-turbo')
+        whisper_model = whisper.load_model(whisper_model_name)
+        self.n_mels = whisper_model.dims.n_mels
+        self.whisper_encoder = whisper_model.encoder
+        for param in self.whisper_encoder.parameters():
+            param.requires_grad = False
+        self.whisper_encoder.eval()
+        
+        # Determine encoder layer index and feature dimensions
+        encoder_layer = self.config['model']['arch_kwargs'].get('encoder_layer', 31)
+        if isinstance(encoder_layer, str):
+            try:
+                encoder_layer = int(encoder_layer)
+            except ValueError:
+                raise ValueError(f"encoder_layer must be integer-like, got {encoder_layer}")
+        self.encoder_layer_idx = int(encoder_layer)
+        self.n_time_tokens = self.config['model'].get('whisper_n_time_tokens', 100)
+        n_audio_state = whisper_model.dims.n_audio_state
+        self.classifier_input_dim = self.n_time_tokens * n_audio_state
+        self.encoder_activations = {}
+        self.whisper_target_sample_rate = 16000
+        self._register_encoder_hook()
+    
+    def _register_encoder_hook(self):
+        """Register hook on Whisper encoder layer to capture activations."""
+        def hook_fn(module, inputs, outputs):
+            if isinstance(outputs, tuple):
+                self.encoder_activations['layer_output'] = outputs[0].detach()
+            else:
+                self.encoder_activations['layer_output'] = outputs.detach()
+        
+        encoder_layers = self.whisper_encoder.blocks
+        num_layers = len(encoder_layers)
+        if self.encoder_layer_idx < 0 or self.encoder_layer_idx >= num_layers:
+            raise ValueError(
+                f"Encoder layer index {self.encoder_layer_idx} out of range (0-{num_layers-1})"
+            )
+        encoder_layers[self.encoder_layer_idx].register_forward_hook(hook_fn)
     
     def _get_feature_dim(self) -> int:
         """Get feature dimension based on layer_out and architecture."""
@@ -258,27 +315,10 @@ class NSynthLinearEvalModule(L.LightningModule):
         Returns:
             logits: Classification logits of shape (batch, num_classes)
         """
-        # Use SSLClassifier's forward to get features
-        # We need to extract features, not the full forward pass
-        with torch.no_grad():
-            if self.feature_extractor_wrapper.byola_arch:
-                _, _, _ = self.feature_extractor_wrapper.feature_extractor.model(
-                    x, with_latent=False, fake_relu=False
-                )
-                activations = self.feature_extractor_wrapper.act_hook_dict[self.layer_out]
-            else:
-                predictions, rep, all_outputs = self.feature_extractor_wrapper.feature_extractor.model(
-                    x, with_latent=True, fake_relu=False
-                )
-                activations = all_outputs[self.layer_out]
-            
-            # Time average and flatten
-            if self.feature_extractor_wrapper.time_avg_rep:
-                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
-            else:
-                activations = activations.view(activations.shape[0], -1)
-            
-            activations = activations.detach()
+        if self.use_whisper:
+            activations = self._extract_whisper_features(x)
+        else:
+            activations = self._extract_ssl_features(x)
         
         # Apply dropout
         if self.dropout:
@@ -292,6 +332,50 @@ class NSynthLinearEvalModule(L.LightningModule):
         logits = self.classifier(activations)
         
         return logits
+    
+    def _extract_ssl_features(self, x):
+        """Extract features using SSL backbone."""
+        # Use SSLClassifier's forward to get features
+        with torch.no_grad():
+            if self.feature_extractor_wrapper.byola_arch:
+                _, _, _ = self.feature_extractor_wrapper.feature_extractor.model(
+                    x, with_latent=False, fake_relu=False
+                )
+                activations = self.feature_extractor_wrapper.act_hook_dict[self.layer_out]
+            else:
+                _, _, all_outputs = self.feature_extractor_wrapper.feature_extractor.model(
+                    x, with_latent=True, fake_relu=False
+                )
+                activations = all_outputs[self.layer_out]
+            
+            # Time average and flatten
+            if self.feature_extractor_wrapper.time_avg_rep:
+                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+            else:
+                activations = activations.view(activations.shape[0], -1)
+            
+            activations = activations.detach()
+        return activations
+    
+    def _extract_whisper_features(self, x):
+        """Extract features from Whisper encoder."""
+        if x.dim() == 3:
+            x = x.squeeze(1)
+        original_device = x.device
+        audio = x.detach().float().cpu()
+        audio = whisper.pad_or_trim(audio)
+        mel = whisper.log_mel_spectrogram(audio, n_mels=self.n_mels).to(original_device)
+        
+        with torch.no_grad():
+            encoder_output = self.whisper_encoder(mel)
+            if 'layer_output' in self.encoder_activations:
+                layer_activations = self.encoder_activations['layer_output']
+            else:
+                layer_activations = encoder_output
+            layer_activations = layer_activations[:, :self.n_time_tokens, :]
+            activations = layer_activations.flatten(start_dim=1)
+            self.encoder_activations.clear()
+        return activations
     
     def _step(self, batch, batch_idx, step_type):
         """Common step for train/val/test."""
@@ -414,7 +498,7 @@ class NSynthLinearEvalModule(L.LightningModule):
             split='train',
             task=self.task,
             label_field=self.label_field if self.task == 'other' else None,
-            sample_rate=20000,  # Match existing models
+            sample_rate=self.sample_rate,
             duration=self.duration,
             fade_window_duration=self.fade_window_duration,
         )
@@ -433,7 +517,7 @@ class NSynthLinearEvalModule(L.LightningModule):
             split='valid',
             task=self.task,
             label_field=self.label_field if self.task == 'other' else None,
-            sample_rate=20000,  # Match existing models
+            sample_rate=self.sample_rate,
             duration=self.duration,
             fade_window_duration=self.fade_window_duration,
         )

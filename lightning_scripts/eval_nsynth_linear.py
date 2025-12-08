@@ -34,6 +34,10 @@ def cli_main(args):
         config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     else:
         raise ValueError("Must provide config_path")
+
+    use_whisper = args.encoder_type == 'whisper'
+    if not use_whisper and 'whisper' in str(config_path).lower():
+        use_whisper = True
     
     print(f"Evaluating config: {config_path}")
     
@@ -49,52 +53,70 @@ def cli_main(args):
     if 'model' not in config:
         config['model'] = {}
     
-    # Handle supervised models (use arch_params) vs SSL models (use arch_kwargs)
-    if args.supervised_backbone:
-        # Supervised models use arch_params for checkpoint loading, but SSLClassifier needs arch_kwargs
-        # Keep both: arch_params for model loading, arch_kwargs for SSLClassifier internal logic
-        if 'arch_params' in config['model']:
-            if 'arch_kwargs' not in config['model']:
-                config['model']['arch_kwargs'] = {}
-            # Copy arch_params to arch_kwargs (but keep arch_params for checkpoint loading)
-            import copy
-            for key, value in config['model']['arch_params'].items():
-                if key not in config['model']['arch_kwargs']:
-                    # Deep copy to avoid modifying the original arch_params
-                    if isinstance(value, dict):
-                        config['model']['arch_kwargs'][key] = copy.deepcopy(value)
-                    else:
-                        config['model']['arch_kwargs'][key] = value
-            # Extract backbone from arch_name for supervised models
-            arch_name = config['model'].get('arch_name', '')
-            if 'kell2018' in arch_name:
-                config['model']['arch_kwargs']['backbone'] = 'kell2018'
-            elif 'resnet' in arch_name:
-                # Extract resnet type from arch_name
-                if 'resnet18' in arch_name or 'resnet_multi_task18' in arch_name:
-                    config['model']['arch_kwargs']['backbone'] = 'resnet18'
-                else:
-                    config['model']['arch_kwargs']['backbone'] = 'resnet50'
-        else:
-            # If no arch_params, create arch_kwargs from scratch
-            if 'arch_kwargs' not in config['model']:
-                config['model']['arch_kwargs'] = {}
-    else:
-        # SSL models use arch_kwargs
+    # Handle encoder configuration
+    if use_whisper:
         if 'arch_kwargs' not in config['model']:
             config['model']['arch_kwargs'] = {}
-        config['model']['arch_kwargs']['supervised'] = False
-    
-    config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
+        if 'whisper_model' not in config['model']:
+            config['model']['whisper_model'] = args.whisper_model
+        try:
+            encoder_layer = eval(args.layer_str)
+            if not isinstance(encoder_layer, int):
+                encoder_layer = int(args.layer_str)
+        except (ValueError, SyntaxError, NameError):
+            try:
+                encoder_layer = int(args.layer_str)
+            except ValueError:
+                raise ValueError(f"layer_str must be convertible to int when using Whisper, got {args.layer_str}")
+        config['model']['arch_kwargs']['encoder_layer'] = encoder_layer
+    else:
+        # Handle supervised models (use arch_params) vs SSL models (use arch_kwargs)
+        if args.supervised_backbone:
+            # Supervised models use arch_params for checkpoint loading, but SSLClassifier needs arch_kwargs
+            # Keep both: arch_params for model loading, arch_kwargs for SSLClassifier internal logic
+            if 'arch_params' in config['model']:
+                if 'arch_kwargs' not in config['model']:
+                    config['model']['arch_kwargs'] = {}
+                # Copy arch_params to arch_kwargs (but keep arch_params for checkpoint loading)
+                import copy
+                for key, value in config['model']['arch_params'].items():
+                    if key not in config['model']['arch_kwargs']:
+                        # Deep copy to avoid modifying the original arch_params
+                        if isinstance(value, dict):
+                            config['model']['arch_kwargs'][key] = copy.deepcopy(value)
+                        else:
+                            config['model']['arch_kwargs'][key] = value
+                # Extract backbone from arch_name for supervised models
+                arch_name = config['model'].get('arch_name', '')
+                if 'kell2018' in arch_name:
+                    config['model']['arch_kwargs']['backbone'] = 'kell2018'
+                elif 'resnet' in arch_name:
+                    # Extract resnet type from arch_name
+                    if 'resnet18' in arch_name or 'resnet_multi_task18' in arch_name:
+                        config['model']['arch_kwargs']['backbone'] = 'resnet18'
+                    else:
+                        config['model']['arch_kwargs']['backbone'] = 'resnet50'
+            else:
+                # If no arch_params, create arch_kwargs from scratch
+                if 'arch_kwargs' not in config['model']:
+                    config['model']['arch_kwargs'] = {}
+        else:
+            # SSL models use arch_kwargs
+            if 'arch_kwargs' not in config['model']:
+                config['model']['arch_kwargs'] = {}
+            config['model']['arch_kwargs']['supervised'] = False
+        config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['hparas']['lr_schedule'] = args.lr_scheduler
     
+    target_sample_rate = 16000 if use_whisper else 20000
+
     # Get NSynth dataset to determine num_classes
     train_dataset = NsynthDataset(
         nsynth_root=args.nsynth_root,
         split='train',
         task=args.task,
         label_field=args.label_field if args.task == 'other' else None,
-        sample_rate=20000,  # Match existing models
+        sample_rate=target_sample_rate,
         duration=args.duration,  # Duration in seconds (None = full length)
         fade_window_duration=args.fade_window_duration,
     )
@@ -116,23 +138,27 @@ def cli_main(args):
         }
     }
     
-    # Get checkpoint for SSL model
+    # Get checkpoint for encoder if needed
     checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-    if args.ckpt_path == "":
-        ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        if len(ckpt_paths) > 0:
-            ckpt_path = ckpt_paths[-1]  # get latest checkpoint
-            print(f"Using checkpoint: {ckpt_path}")
-        else:
-            raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-        ckpt_modifier = ''
+    if use_whisper:
+        ckpt_path = None
+        ckpt_modifier = '_whisper'
     else:
-        ckpt_path = args.ckpt_path
-        ckpt_modifier = '_from_best_val_ckpt'
+        if args.ckpt_path == "":
+            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+            if len(ckpt_paths) > 0:
+                ckpt_path = ckpt_paths[-1]  # get latest checkpoint
+                print(f"Using checkpoint: {ckpt_path}")
+            else:
+                raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
+            ckpt_modifier = ''
+        else:
+            ckpt_path = args.ckpt_path
+            ckpt_modifier = '_from_best_val_ckpt'
     
     # Build modifier string for checkpoint naming
     time_avg_str = ""
-    if not args.time_avg_rep:
+    if not use_whisper and not args.time_avg_rep:
         time_avg_str = "full_rep_"
     
     scheduler_str = ""
@@ -147,8 +173,12 @@ def cli_main(args):
     if args.with_dropout:
         dropout_str = "_w_dropout"
     
+    layer_component = (
+        f"whisper_layer_{config['model']['arch_kwargs']['encoder_layer']}"
+        if use_whisper else args.layer_str.replace('.', '_')
+    )
     str_modifier = (
-        f"{args.task}_{args.layer_str.replace('.', '_')}_{time_avg_str}"
+        f"{args.task}_{layer_component}_{time_avg_str}"
         f"{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}"
         f"{mlp_str}{ckpt_modifier}{dropout_str}"
     )
@@ -173,6 +203,8 @@ def cli_main(args):
         label_field=args.label_field if args.task == 'other' else None,
         duration=args.duration,
         fade_window_duration=args.fade_window_duration,
+        sample_rate=target_sample_rate,
+        use_whisper=use_whisper,
     )
     
     # Check if existing classifier checkpoint exists
@@ -242,7 +274,7 @@ def cli_main(args):
         split='test',
         task=args.task,
         label_field=args.label_field if args.task == 'other' else None,
-        sample_rate=20000,
+        sample_rate=target_sample_rate,
         duration=args.duration,
         fade_window_duration=args.fade_window_duration,
     )
@@ -445,6 +477,18 @@ if __name__ == "__main__":
         default=0.01,
         type=float,
         help='Duration in seconds for Hann window fade-out at right edge (default: 0.01 = 10ms).'
+    )
+    parser.add_argument(
+        '--encoder_type',
+        default='ssl',
+        choices=['ssl', 'whisper'],
+        help='Encoder to use for feature extraction. Set to "whisper" to use a frozen Whisper encoder.'
+    )
+    parser.add_argument(
+        '--whisper_model',
+        default='large-v3-turbo',
+        type=str,
+        help='Whisper model name when encoder_type="whisper" (e.g., "large-v3-turbo").'
     )
     
     args = parser.parse_args()

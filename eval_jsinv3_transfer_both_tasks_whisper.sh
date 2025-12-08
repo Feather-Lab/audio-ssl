@@ -34,5 +34,5 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path whisp
                                    --task 'both' \
                                    --train_epochs 6 \
                                    --checkpoint_every_n_steps 2000 \
-                                   --no-with_noise --eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   --no-with_noise --no-eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                    
