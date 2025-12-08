@@ -1,0 +1,44 @@
+data:
+  dataset: MatchedAudiosetBatched
+  noise_h5_path: '/mnt/home/igriffith/ceph/datasets/audioset/unbalanced_train_segments.hdf5'
+  val_speech_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
+  val_noise_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5'
+  target_keys: ['noise/labels_int']
+  blocked_batches: true
+  signal_augment: true
+  skip_aug_match: false
+  in_sample_rate: 16000
+  out_sample_rate: 20000
+
+audio_rep:
+  name: 'cochleagram_1'
+  on_gpu: True
+
+audio_transforms:
+  low_snr: -10
+  high_snr: 10
+  dbspl: 60
+
+val_metric:
+  audioset_task: 'val_noise/labels_int_acc'
+
+hparas:
+  epochs: 100
+  batch_size: 192
+  global_batch_size: 768
+  optimizer: "LARS"
+  num_warmup_steps_or_ratio: 0.01
+  lr: 0.2
+  valid_step: 5000
+  task_loss_params:
+    noise/labels_int:
+      loss_type: 'bcewithlogitsloss'
+      weight: 300.0
+
+model:
+  arch_name: "kell2018_multi_task"
+  arch_params:
+    num_classes:
+      noise/labels_int: 527
+    pretrained: False
+

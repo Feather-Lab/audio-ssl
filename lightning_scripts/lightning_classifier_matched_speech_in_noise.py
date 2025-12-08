@@ -15,7 +15,10 @@ from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_R
 
 sys.path.append('./lightning_scripts/')
 from audio_ssl.misc import LARS, CosineWarmupScheduler
-from jsinV3DataLoader_precombined_batched import MatchedSpeechInNoiseDatasetBatched
+from jsinV3DataLoader_precombined_batched import (
+    MatchedSpeechInNoiseDatasetBatched,
+    MatchedAudiosetBatched,
+)
 
 
 
@@ -80,6 +83,21 @@ class LitWordAudioSetModel(L.LightningModule):
                 ]
 
         self.model = ModelWithFrontEnd(self.audio_rep, self.model)
+
+        # Track dataset type (MatchedSpeechInNoiseDatasetBatched default)
+        self.dataset_name = self.config['data'].get('dataset', "MatchedSpeechInNoiseDatasetBatched")
+        self.dataset_common_kwargs = {
+            'low_db': self.config['audio_transforms']['low_snr'],
+            'high_db': self.config['audio_transforms']['high_snr'],
+            'db_spl': self.config['audio_transforms']['dbspl'],
+            'batch_size': self.config['hparas']['batch_size'],
+            'target_keys': self.config['data']['target_keys'],
+            'blocked_batches': self.config['data'].get('blocked_batches', True),
+            'signal_augment': self.config['data'].get('signal_augment', False),
+            'skip_aug_match': self.config['data'].get('skip_aug_match', False),
+            'clean_percentage': self.config['data'].get('clean_percentage', 0.0),
+            'overfit': self.config['data'].get('overfit', False),
+        }
 
     
         self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
@@ -219,51 +237,100 @@ class LitWordAudioSetModel(L.LightningModule):
         # # combine labels: each target is dict for each key, stack the values 
         labels = {}
         for label_key in targets[0].keys():
-            labels[label_key] = torch.concat([label_set[label_key] for label_set in targets])
+            stacked = torch.concat([label_set[label_key] for label_set in targets])
+            if stacked.ndim > 1 and stacked.shape[-1] < 527:
+                pad_width = 527 - stacked.shape[-1]
+                stacked = F.pad(stacked, (0, pad_width), mode='constant', value=0)
+            labels[label_key] = stacked
         return audio, labels
 
     def train_dataloader(self):
-        # set train dataloader as attr so we can rotate examples every epoch 
-        dataset = MatchedSpeechInNoiseDatasetBatched(speech_h5_path=self.config['data']['speech_h5_path'],
-                                                     noise_h5_path=self.config['data']['noise_h5_path'],
-                                                     low_db=self.config['audio_transforms']['low_snr'],
-                                                     high_db=self.config['audio_transforms']['high_snr'],
-                                                     db_spl=self.config['audio_transforms']['dbspl'],
-                                                     batch_size=self.config['hparas']['batch_size'],
-                                                     target_keys=self.config['data']['target_keys'],
-                                                     overfit=self.config['data'].get('overfit', False)
-                                                     )
-        
-        train_dataloader = torch.utils.data.DataLoader(
+        if self.dataset_name == "MatchedAudiosetBatched":
+            dataset = MatchedAudiosetBatched(
+                noise_h5_path=self.config['data']['noise_h5_path'],
+                low_db=self.config['audio_transforms']['low_snr'],
+                high_db=self.config['audio_transforms']['high_snr'],
+                db_spl=self.config['audio_transforms']['dbspl'],
+                batch_size=self.config['hparas']['batch_size'],
+                target_keys=self.config['data'].get("target_keys", None),
+                blocked_batches=self.config['data'].get("blocked_batches", False),
+                signal_augment=self.config['data'].get("signal_augment", False),
+                skip_aug_match=self.config['data'].get("skip_aug_match", False),
+                clean_percentage=self.config['data'].get("clean_percentage", 0.0),
+                in_sample_rate=self.config['data'].get('in_sample_rate', 16_000),
+                out_sample_rate=self.config['data'].get('out_sample_rate', 20_000),
+                overfit=self.config['data'].get('overfit', False),
+            )
+            return torch.utils.data.DataLoader(
+                dataset,
+                batch_size=1,
+                num_workers=self.config['num_workers'],
+                pin_memory=True,
+                shuffle=True,
+                collate_fn=self.collate_fn,
+                drop_last=True,
+            )
+        dataset = MatchedSpeechInNoiseDatasetBatched(
+            speech_h5_path=self.config['data']['speech_h5_path'],
+            noise_h5_path=self.config['data']['noise_h5_path'],
+            low_db=self.config['audio_transforms']['low_snr'],
+            high_db=self.config['audio_transforms']['high_snr'],
+            db_spl=self.config['audio_transforms']['dbspl'],
+            batch_size=self.config['hparas']['batch_size'],
+            target_keys=self.config['data']['target_keys'],
+            blocked_batches=self.config['data'].get('blocked_batches', True),
+            signal_augment=self.config['data'].get('signal_augment', False),
+            skip_aug_match=self.config['data'].get('skip_aug_match', False),
+            clean_percentage=self.config['data'].get('clean_percentage', 0.0),
+            overfit=self.config['data'].get('overfit', False),
+        )
+        return torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
             num_workers=self.config['num_workers'], 
             pin_memory=True,
-            # persistent_workers=True,
             shuffle=True,
             collate_fn=self.collate_fn,
         )
-        return train_dataloader
     
     def val_dataloader(self):
-        dataset = MatchedSpeechInNoiseDatasetBatched(speech_h5_path=self.config['data']['val_speech_h5_path'],
-                                                     noise_h5_path=self.config['data']['val_noise_h5_path'],
-                                                     low_db=self.config['audio_transforms']['low_snr'],
-                                                     high_db=self.config['audio_transforms']['high_snr'],
-                                                     db_spl=self.config['audio_transforms']['dbspl'],
-                                                     batch_size=self.config['hparas']['batch_size'],
-                                                     target_keys=self.config['data']['target_keys'],
-
-                                                     )
-        dataloader = torch.utils.data.DataLoader(
+        if self.dataset_name == "MatchedAudiosetBatched":
+            dataset = MatchedSpeechInNoiseDatasetBatched(
+                speech_h5_path=self.config['data']['val_speech_h5_path'],
+                noise_h5_path=self.config['data']['val_noise_h5_path'],
+                low_db=self.config['audio_transforms']['low_snr'],
+                high_db=self.config['audio_transforms']['high_snr'],
+                db_spl=self.config['audio_transforms']['dbspl'],
+                batch_size=self.config['hparas']['batch_size'],
+                signal_augment=self.config['data'].get("signal_augment", False),
+                skip_aug_match=self.config['data'].get("skip_aug_match", False),
+                target_keys=self.config['data'].get("target_keys", None),
+                blocked_batches=self.config['data'].get("blocked_batches", True),
+                clean_percentage=self.config['data'].get("clean_percentage", 0.0),
+                overfit=self.config['data'].get('overfit', False),
+            )
+        else:
+            dataset = MatchedSpeechInNoiseDatasetBatched(
+                speech_h5_path=self.config['data']['val_speech_h5_path'],
+                noise_h5_path=self.config['data']['val_noise_h5_path'],
+                low_db=self.config['audio_transforms']['low_snr'],
+                high_db=self.config['audio_transforms']['high_snr'],
+                db_spl=self.config['audio_transforms']['dbspl'],
+                batch_size=self.config['hparas']['batch_size'],
+                target_keys=self.config['data']['target_keys'],
+                blocked_batches=self.config['data'].get('blocked_batches', True),
+                signal_augment=self.config['data'].get('signal_augment', False),
+                skip_aug_match=self.config['data'].get('skip_aug_match', False),
+                clean_percentage=self.config['data'].get('clean_percentage', 0.0),
+                overfit=self.config['data'].get('overfit', False),
+            )
+        return torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
             num_workers=self.config['num_workers'],
             shuffle=False,
             collate_fn=self.collate_fn,
-
         )
-        return dataloader
 
     # @property
     def total_training_steps(self) -> int:

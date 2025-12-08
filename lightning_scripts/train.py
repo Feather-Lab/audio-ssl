@@ -80,7 +80,8 @@ def cli_main(args):
 
     else:
         classifier = True
-        if config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+        dataset_name = config['data'].get('dataset', "")
+        if dataset_name in ["MatchedSpeechInNoiseDatasetBatched", "MatchedAudiosetBatched"]:
             module = LitWordAudioSetModelMatched
         else:
             module = LitWordAudioSetModel
