@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
 
-#SBATCH --mem=1000Gb
+#SBATCH --mem=256Gb
 #SBATCH --time=1:00:00 
 #SBATCH --partition=gpu
 #SBATCH -N 1
@@ -30,12 +30,23 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --layer 'invar_head' \
 
 
-srun -K python3 -u lightning_scripts/run_param_decoding_sep_db_and_filter.py  \
+srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py  \
+                                   --model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
                                    --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --batch_size 192 \
                                    --num_eval 10 \
                                    --num_train 50 \
                                    --job_id $SLURM_ARRAY_TASK_ID \
-                                   --invar_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
-                                   --equi_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml \
                                    --ridge_alpha 0.5
+
+# Unbalanced supervised model
+# srun -K python3 -u lightning_scripts/run_param_decoding_sep_db_and_filter.py  \
+#                                    --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --batch_size 192 \
+#                                    --num_eval 10 \
+#                                    --num_train 50 \
+#                                    --job_id $SLURM_ARRAY_TASK_ID \
+#                                    --invar_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
+#                                    --equi_model_config model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
+#                                    --ridge_alpha 0.5
+                                #    --equi_model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml \

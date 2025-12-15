@@ -757,9 +757,14 @@ if __name__ == '__main__':
 
     if args.ckpt_path == "":
         checkpoint_dir = Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-        # ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        # ckpt_path = ckpt_paths[-1] # get latest checkpoint 
-        ckpt_path = list(checkpoint_dir.glob("*best_val*.ckpt"))[-1]
+        ckpt_candidates = list(checkpoint_dir.glob("*best_val*.ckpt"))
+        if ckpt_candidates:
+            ckpt_path = sorted(ckpt_candidates, key=os.path.getctime)[-1]
+        else:
+            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+            if not ckpt_paths:
+                raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
+            ckpt_path = ckpt_paths[-1]
         print(ckpt_path)
         ckpt_str = ''
     else:
