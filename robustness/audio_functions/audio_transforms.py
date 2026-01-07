@@ -7,6 +7,7 @@ import sys
 import chcochleagram
 from chcochleagram import compression
 from chcochleagram import cochleagram
+import torch.nn.functional as F
 from chcochleagram import *
 # from torchaudio.sox_effects import apply_effects_tensor
 import sox 
@@ -602,6 +603,8 @@ class CombineWithRandomDBSNR(torch.nn.Module):
             background_wav (torch.Tensor): the waveform that will be used as 
                 the background audio sample
         """
+        if self.high_snr == 'inf' or self.low_snr == 'inf':
+            return foreground_wav, None
         rand_db_snr = self.low_snr + (self.high_snr - self.low_snr) * torch.rand(1)
         rms_ratio = np.power(10.0, rand_db_snr / 20.0)
         # Demean signal and noise before computing rms
@@ -664,6 +667,21 @@ class CenterCrop:
         sig_len = len(x)
         start_crop = int((sig_len - self.crop_length)/2)
         x = x[start_crop : start_crop + self.crop_length]
+        return x
+
+class CenterCropOrPad:
+    def __init__(self, sig_length):
+        self.sig_length = sig_length
+
+    def __call__(self, x):
+        if x.shape[0] < self.sig_length:
+            # edge pad if x is too short
+            pad_dur = (self.sig_length - len(x)) // 2 + 1
+            x = F.pad(x, (pad_dur, pad_dur), "constant", 0)
+
+        start_idx = int((x.shape[0] - self.sig_length) / 2)
+        x = x[start_idx : start_idx + self.sig_length]
+
         return x
 
 class CombineWithFixedDBSNR(torch.nn.Module):

@@ -36,24 +36,24 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 #                                    --array_ix $SLURM_ARRAY_TASK_ID \
 #                                    --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
-# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/resnet18_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
-#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
-#                                    --model_ckpt_dir model_checkpoints \
-#                                    --batch_size 192 \
-#                                    --layer_str 'layer4' \
-#                                    --optimizer "AdamW" --lr 0.0005 \
-#                                    --task 'both' \
-#                                    --train_epochs 6 \
-#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
-                                   
-srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
-                                   --layer_str 'relu4' \
+                                   --layer_str 'relu3' \
                                    --optimizer "AdamW" --lr 0.0005 \
                                    --task 'both' \
                                    --train_epochs 6 \
-                                   --supervised_backbone \
                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   
+# srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
+#                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
+#                                    --model_ckpt_dir model_checkpoints \
+#                                    --batch_size 192 \
+#                                    --layer_str 'relu4' \
+#                                    --optimizer "AdamW" --lr 0.0005 \
+#                                    --task 'both' \
+#                                    --train_epochs 6 \
+#                                    --supervised_backbone \
+#                                    --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                    

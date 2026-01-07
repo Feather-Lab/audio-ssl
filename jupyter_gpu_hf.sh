@@ -2,7 +2,7 @@
 #SBATCH --job-name=jupyter_notebook
 #SBATCH --output=outLogs/notebook_%j.out
 #SBATCH --error=outLogs/notebook_%j.err
-#SBATCH --mem=8Gb
+#SBATCH --mem=32Gb
 #SBATCH --cpus-per-task=4
 #SBATCH --time=3:00:00
 #SBATCH --partition=gpu

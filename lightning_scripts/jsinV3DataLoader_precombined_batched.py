@@ -823,6 +823,7 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
         if self.return_noise:
             noise_h5_path = "/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_unbalanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5"
             self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
+            self.num_noise_files = len(self.noise_files['ndarray_data']['signal'])
 
 
     def class_map(self):
@@ -865,7 +866,14 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
                     #     targets[target_key]  = self.noise_files['labels'][noise_label_1_ix
 
         if self.return_noise:
-            noise = self.noise_files['ndarray_data']['signal'][speech_ixs]
+            # Sample random noise indices (same number as batch size)
+            if self.num_noise_files >= self.batch_size:
+                noise_idx = np.random.randint(0, self.num_noise_files - self.batch_size + 1)
+                noise_ixs = np.arange(noise_idx, noise_idx + self.batch_size)
+            else:
+                # If noise file is smaller than batch_size, sample with replacement
+                noise_ixs = np.random.randint(0, self.num_noise_files, size=self.batch_size)
+            noise = self.noise_files['ndarray_data']['signal'][noise_ixs]
             noise_audio = []
             for noise_eg in noise:
                 noise_eg, _ = self.center_crop(noise_eg, None)
