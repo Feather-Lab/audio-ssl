@@ -29,6 +29,7 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
         max_interval: int = 12,
         min_midi: int = 40,
         max_midi: int = 72,
+        experiment_type: str = "interval_match",
     ):
         super().__init__()
         self.nsynth_root = Path(nsynth_root)
@@ -45,6 +46,10 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
         self.max_interval = max_interval
         self.min_midi = min_midi
         self.max_midi = max_midi
+        self.experiment_type = experiment_type
+
+        if experiment_type not in ["interval_match", "direction_match", "instrument_match"]:
+            raise ValueError(f"experiment_type must be 'interval_match' or 'direction_match' or 'instrument_match', got {experiment_type}")
 
         self.metadata_path = self.nsynth_root / f"nsynth-{split}" / "examples.json"
         self.audio_dir = self.nsynth_root / f"nsynth-{split}" / "audio"
@@ -108,6 +113,17 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
         if interval == 0 or abs(interval) < self.min_interval or abs(interval) > self.max_interval:
             raise ValueError(f"Interval must be in ±[{self.min_interval},{self.max_interval}] and non-zero")
 
+        if self.experiment_type == "interval_match":
+            return self._build_interval_match_triplet(interval, rng)
+        elif self.experiment_type == "direction_match":
+            return self._build_direction_match_triplet(interval, rng)
+        elif self.experiment_type == "instrument_match":
+            return self._build_instrument_match_triplet(interval, rng)
+        else:
+            raise ValueError(f"Unknown experiment_type: {self.experiment_type}")
+
+    def _build_interval_match_triplet(self, interval: int, rng: random.Random) -> Dict[str, Dict]:
+        """Original behavior: anchor and positive share same interval and instrument, different start notes."""
         instrument_to_starts: Dict[str, List[int]] = {}
         for inst in self.instruments:
             starts = self._valid_interval_starts(interval, inst)
@@ -162,6 +178,162 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
             },
         }
         triplet["negative"]["start_id"] = triplet["positive"]["start_id"]
+        return triplet
+
+    def _build_direction_match_triplet(self, interval: int, rng: random.Random) -> Dict[str, Dict]:
+        """New behavior: anchor and positive share same MIDI values but different instruments.
+        Negative uses same instrument as positive but swaps the order of MIDI notes."""
+        # Find instruments that support the interval
+        instrument_to_starts: Dict[str, List[int]] = {}
+        for inst in self.instruments:
+            starts = self._valid_interval_starts(interval, inst)
+            if len(starts) >= 1:
+                instrument_to_starts[inst] = starts
+        if len(instrument_to_starts) < 2:
+            raise RuntimeError(f"Need at least 2 instruments supporting interval {interval}, found {len(instrument_to_starts)}")
+
+        # Choose anchor instrument and start pitch
+        anchor_instrument = rng.choice(list(instrument_to_starts.keys()))
+        anchor_starts = instrument_to_starts[anchor_instrument]
+        anchor_start = rng.choice(anchor_starts)
+        anchor_target = anchor_start + interval
+
+        # Find a different instrument that has both anchor_start and anchor_target pitches
+        candidate_positive_instruments = []
+        for inst in self.instruments:
+            if inst == anchor_instrument:
+                continue
+            if (inst in self.pitch_instrument_to_ids.get(anchor_start, {}) and 
+                inst in self.pitch_instrument_to_ids.get(anchor_target, {})):
+                candidate_positive_instruments.append(inst)
+        
+        if not candidate_positive_instruments:
+            raise RuntimeError(f"No other instrument has both pitches {anchor_start} and {anchor_target}")
+
+        positive_instrument = rng.choice(candidate_positive_instruments)
+        
+        # Positive: same MIDI values as anchor, different instrument
+        positive_start = anchor_start
+        positive_target = anchor_target
+
+        # Negative: same instrument as positive, but swapped order (target → start)
+        negative_start = anchor_target  # This was the target in anchor/positive
+        negative_target = anchor_start  # This was the start in anchor/positive
+        negative_interval = -interval  # Swapped direction
+
+        triplet = {
+            "anchor": {
+                "instrument": anchor_instrument,
+                "start_pitch": anchor_start,
+                "target_pitch": anchor_target,
+                "interval": interval,
+                "start_id": self._choose_file(anchor_start, anchor_instrument, rng),
+                "target_id": self._choose_file(anchor_target, anchor_instrument, rng),
+            },
+            "positive": {
+                "instrument": positive_instrument,
+                "start_pitch": positive_start,
+                "target_pitch": positive_target,
+                "interval": interval,
+                "start_id": self._choose_file(positive_start, positive_instrument, rng),
+                "target_id": self._choose_file(positive_target, positive_instrument, rng),
+            },
+            "negative": {
+                "instrument": positive_instrument,
+                "start_pitch": negative_start,
+                "target_pitch": negative_target,
+                "interval": negative_interval,
+                "start_id": self._choose_file(negative_start, positive_instrument, rng),
+                "target_id": self._choose_file(negative_target, positive_instrument, rng),
+            },
+        }
+        return triplet
+
+    def _build_instrument_match_triplet(self, interval: int, rng: random.Random) -> Dict[str, Dict]:
+        """Instrument classification: anchor and positive share same instrument but different MIDI notes.
+        Negative uses different instrument but same MIDI note as positive."""
+        # Find instruments that support the interval with at least 2 different start pitches
+        instrument_to_starts: Dict[str, List[int]] = {}
+        for inst in self.instruments:
+            starts = self._valid_interval_starts(interval, inst)
+            if len(starts) >= 2:
+                instrument_to_starts[inst] = starts
+        
+        if not instrument_to_starts:
+            raise RuntimeError(f"No instruments support interval {interval} with at least 2 different start pitches")
+        
+        # Choose an instrument for anchor and positive
+        instrument = rng.choice(list(instrument_to_starts.keys()))
+        available_starts = instrument_to_starts[instrument]
+        
+        # Choose two different start MIDI notes for anchor and positive (same instrument)
+        anchor_pitch = rng.choice(available_starts)
+        positive_pitch = rng.choice([p for p in available_starts if p != anchor_pitch])
+        
+        # For the triplet structure, we need start and target pitches
+        # We'll use the interval to determine target pitches
+        anchor_start = anchor_pitch
+        anchor_target = anchor_start + interval
+        positive_start = positive_pitch
+        positive_target = positive_start + interval
+        negative_start = positive_pitch  # Same MIDI note as positive
+        negative_target = negative_start + interval
+        
+        # Verify anchor and positive pitches are valid
+        if not (self.min_midi <= anchor_target <= self.max_midi):
+            raise RuntimeError(f"Anchor target pitch {anchor_target} out of range")
+        if not (self.min_midi <= positive_target <= self.max_midi):
+            raise RuntimeError(f"Positive target pitch {positive_target} out of range")
+        if not (self.min_midi <= negative_target <= self.max_midi):
+            raise RuntimeError(f"Negative target pitch {negative_target} out of range")
+        
+        # Verify anchor and positive pitches exist for their instrument
+        if instrument not in self.pitch_instrument_to_ids.get(anchor_target, {}):
+            raise RuntimeError(f"Instrument {instrument} doesn't have pitch {anchor_target}")
+        if instrument not in self.pitch_instrument_to_ids.get(positive_target, {}):
+            raise RuntimeError(f"Instrument {instrument} doesn't have pitch {positive_target}")
+        
+        # Choose a different instrument that has both the same start MIDI note as positive
+        # and the corresponding target pitch
+        candidate_negative_instruments = []
+        for inst in self.instruments:
+            if inst == instrument:
+                continue
+            if (inst in self.pitch_instrument_to_ids.get(negative_start, {}) and 
+                inst in self.pitch_instrument_to_ids.get(negative_target, {})):
+                candidate_negative_instruments.append(inst)
+        
+        if not candidate_negative_instruments:
+            raise RuntimeError(f"No other instrument has both pitches {negative_start} and {negative_target}")
+        
+        negative_instrument = rng.choice(candidate_negative_instruments)
+        
+        triplet = {
+            "anchor": {
+                "instrument": instrument,
+                "start_pitch": anchor_start,
+                "target_pitch": anchor_target,
+                "interval": interval,
+                "start_id": self._choose_file(anchor_start, instrument, rng),
+                "target_id": self._choose_file(anchor_target, instrument, rng),
+            },
+            "positive": {
+                "instrument": instrument,
+                "start_pitch": positive_start,
+                "target_pitch": positive_target,
+                "interval": interval,
+                "start_id": self._choose_file(positive_start, instrument, rng),
+                "target_id": self._choose_file(positive_target, instrument, rng),
+            },
+            "negative": {
+                "instrument": negative_instrument,
+                "start_pitch": negative_start,
+                "target_pitch": negative_target,
+                "interval": interval,
+                "start_id": self._choose_file(negative_start, negative_instrument, rng),
+                "target_id": self._choose_file(negative_target, negative_instrument, rng),
+            },
+        }
         return triplet
 
     def _make_interval_clip(self, start_id: str, target_id: str) -> Tuple[torch.Tensor, int]:
