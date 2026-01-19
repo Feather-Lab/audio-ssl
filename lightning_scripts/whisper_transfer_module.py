@@ -12,6 +12,15 @@ from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_l
 import robustness.audio_functions.audio_transforms as at
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 
+def get_whisper_layer_name_map(whisper_model_name: str) -> tuple[dict[str, int], int]:
+    """Return a layer-name map and layer count for a Whisper encoder."""
+    whisper_model = whisper.load_model(whisper_model_name)
+    num_layers = len(whisper_model.encoder.blocks)
+    layer_map = {f"encoder_{idx}": idx for idx in range(num_layers)}
+    layer_map.update({f"encoder_block_{idx}": idx for idx in range(num_layers)})
+    layer_map.update({f"block_{idx}": idx for idx in range(num_layers)})
+    return layer_map, num_layers
+
 class WhisperTransferModule(L.LightningModule):
     def __init__(self, config, ckpt_path=None):
         super().__init__()

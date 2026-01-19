@@ -4,6 +4,7 @@ from torch import nn
 from torchvision.models.resnet import resnet50
 from robustness.audio_models import resnet50 as resnet50_robusntess
 import robustness.audio_models as robustness_architectures
+from whisper_encoder_arch import TransformerAudioEncoder
 import sys 
 sys.path.append('byol-a')
 import byol_a.models as byol_a_models 
@@ -24,6 +25,9 @@ class ProjectionHead(nn.Module):
         self.g = nn.Sequential(*layers)
     
     def forward(self, x):
+        # catch special case where x is single dimension, and unsqueeze it to 2D
+        if x.dim() == 1:
+            x = x.unsqueeze(1)
         return self.g(x)
 
 class SSLBaseModel(nn.Module):
@@ -73,6 +77,8 @@ class SSLBaseModelSingleTask(nn.Module):
 
         if 'AudioNTT' in backbone:
             self.f = byol_a_models.__dict__[backbone](**kwargs.get('byola_kwargs'))
+        elif 'whisper' in backbone:
+            self.f = TransformerAudioEncoder(**kwargs.get('encoder_kwargs'))
 
         else:
             self.f = robustness_architectures.__dict__[backbone]()
@@ -151,6 +157,9 @@ class SSLBaseModelDualTask(nn.Module):
 
         if 'AudioNTT' in backbone:
             self.f = byol_a_models.__dict__[backbone]()
+        
+        elif 'whisper' in backbone:
+            self.f = TransformerAudioEncoder(**kwargs.get('encoder_kwargs'))
 
         else:
             self.f = robustness_architectures.__dict__[backbone]()

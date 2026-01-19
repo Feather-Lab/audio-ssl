@@ -28,6 +28,7 @@ matplotlib.rcParams.update({'font.size': 26})
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 
+from whisper_encoder_arch import get_whisper_encoder_layer_map
 
 # save the dictionary. 
 def save_obj(obj, name ):
@@ -724,6 +725,8 @@ if __name__ == '__main__':
     parser.add_argument('--config_path', default="", type=str, help='Config for model')
     parser.add_argument('--config_list_path', default='', type=str, help='Path to experiment config.')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
+    parser.add_argument('--layer_str', default='', type=str, help='Layer name override (e.g., "encoder_block_3").')
+    parser.add_argument('--print_whisper_layers', action='store_true', help='Print Whisper encoder layer map and exit.')
     parser.add_argument(
         "--model_ckpt_dir",
         default=Path("./model_checkpoints"),
@@ -754,6 +757,22 @@ if __name__ == '__main__':
             
     print(f"Evaluating config: {config_path}")
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+
+    is_whisper = (
+        config.get('model', {}).get('arch_kwargs', {}).get('backbone') == 'whisper'
+        or 'whisper' in config.get('model', {}).get('arch_name', '')
+    )
+
+    whisper_layer_map = None
+    if is_whisper:
+        encoder_kwargs = config.get('model', {}).get('arch_kwargs', {}).get('encoder_kwargs', {})
+        n_layer = encoder_kwargs.get('n_layer', 4)
+        whisper_layer_map = get_whisper_encoder_layer_map(n_layer)
+        if args.print_whisper_layers:
+            print(f"Whisper encoder layers (n_layer={n_layer}):")
+            for key in sorted(whisper_layer_map.keys()):
+                print(f"{key} -> {whisper_layer_map[key]}")
+            sys.exit(0)
 
     if args.ckpt_path == "":
         checkpoint_dir = Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
@@ -795,9 +814,32 @@ if __name__ == '__main__':
     if 'byola' in str(config_path):
         layer_for_rep = 'final' # TODO: is not used; update to eval at different depths
         byola_arch = True
+    elif is_whisper:
+        if args.layer_str:
+            if args.layer_str.isdigit():
+                layer_key = f"encoder_block_{int(args.layer_str)}"
+            else:
+                layer_key = args.layer_str
+            if layer_key not in whisper_layer_map:
+                valid_names = ", ".join(sorted(whisper_layer_map.keys()))
+                raise ValueError(
+                    f"Invalid whisper layer_str '{args.layer_str}'. "
+                    f"Use an index or one of: {valid_names}"
+                )
+            layer_for_rep = whisper_layer_map[layer_key]
+        else:
+            layer_order = [
+                "input_after_preproc",
+                "conv1",
+                "conv2",
+            ] + [f"encoder_block_{idx}" for idx in range(n_layer)] + [
+                "ln_post",
+                "final",
+            ]
+            layer_for_rep = layer_order[args.LAYER_IDX]
     else:
         metamer_layers = module.metamer_layers
-        layer_for_rep = metamer_layers[args.LAYER_IDX]
+        layer_for_rep = args.layer_str or metamer_layers[args.LAYER_IDX]
     print("Layer name: "+str(layer_for_rep))
     model = model.cuda()
     # net_path = os.getcwd()

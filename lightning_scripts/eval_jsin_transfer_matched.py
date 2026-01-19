@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import lightning as L
 import yaml
+import sys
 import os
 import pickle
 import pathlib
@@ -10,7 +11,7 @@ from argparse import ArgumentParser, BooleanOptionalAction
 
 from lightning_ssl_classifier import SSLClassifier
 from lightning_byola_classifier import BYOLAClassifier
-from whisper_transfer_module import WhisperTransferModule
+from whisper_encoder_arch import get_whisper_encoder_layer_map
 from jsinV3DataLoader_precombined_batched import CleanSpeechInNoiseValDatasetBatched
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
@@ -26,13 +27,9 @@ def cli_main(args):
     # Load config
     if args.config_path != "":
         config_path = pathlib.Path(args.config_path)
-        config_path_lower = args.config_path.lower()
-
-        # Handle whisper configs specified by name (e.g., "whisper_large-v3-turbo") even if file is missing
-        if config_path_lower == 'whisper' or ('whisper' in config_path_lower):
-            config = {}
-        else:
-            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     elif args.config_list_path != "":
         with open(args.config_list_path, 'rb') as f:
             config_dict = pickle.load(f)
@@ -47,11 +44,15 @@ def cli_main(args):
     use_whisper = False
     use_byola = False
     
-    if args.model_type == 'whisper' or 'whisper' in str(config_path).lower():
+    if args.model_type == 'whisper':
+        use_whisper = True
+    elif config.get('model', {}).get('arch_kwargs', {}).get('backbone') == 'whisper':
+        use_whisper = True
+    elif 'whisper' in config.get('model', {}).get('arch_name', ''):
         use_whisper = True
     
+    whisper_layer_str = None
     if use_whisper:
-        # Initialize config structure for Whisper if needed
         if 'model' not in config:
             config['model'] = {}
         if 'hparas' not in config:
@@ -60,33 +61,38 @@ def cli_main(args):
             config['data'] = {}
         if 'arch_kwargs' not in config['model']:
             config['model']['arch_kwargs'] = {}
-        
-        # Extract whisper model type from config_path (e.g., "whisper_large-v3-turbo" -> "large-v3-turbo")
-        # Only extract if not already set in config
-        if 'whisper_model' not in config['model']:
-            config_path_str = str(config_path)
-            whisper_model_type = 'large-v3-turbo'  # default
-            if 'whisper_' in config_path_str:
-                # Extract model type after "whisper_"
-                parts = config_path_str.split('whisper_')
-                model_part = parts[1]
-                whisper_model_type = model_part
-            # Set whisper_model in config
-            config['model']['whisper_model'] = whisper_model_type
-        
-        # Convert layer_str to integer for Whisper encoder layer
-        # Try eval() first (in case it's a Python expression), then fall back to int()
-        try:
-            encoder_layer = eval(args.layer_str)
-            if not isinstance(encoder_layer, int):
-                encoder_layer = int(args.layer_str)
-        except (ValueError, SyntaxError, NameError):
-            try:
-                encoder_layer = int(args.layer_str)
-            except ValueError:
-                raise ValueError(f"layer_str must be convertible to an integer for Whisper model, got: {args.layer_str}")
-        config['model']['arch_kwargs']['encoder_layer'] = encoder_layer
-        config['model']['arch_kwargs']['time_average'] = False  # Whisper doesn't use time_average
+
+        encoder_kwargs = config['model']['arch_kwargs'].get('encoder_kwargs', {})
+        n_layer = encoder_kwargs.get('n_layer', 4)
+        layer_name_map = get_whisper_encoder_layer_map(n_layer)
+
+        if args.print_whisper_layers:
+            print(f"Whisper encoder layers (n_layer={n_layer}):")
+            for key in sorted(layer_name_map.keys()):
+                print(f"{key} -> {layer_name_map[key]}")
+            sys.exit(0)
+
+        if args.layer_str.isdigit():
+            layer_idx = int(args.layer_str)
+            if layer_idx < 0 or layer_idx >= n_layer:
+                raise ValueError(
+                    f"Whisper encoder has {n_layer} layers; got index {layer_idx}."
+                )
+            layer_key = f"encoder_block_{layer_idx}"
+        else:
+            layer_key = args.layer_str
+
+        if layer_key not in layer_name_map:
+            valid_names = ", ".join(sorted(layer_name_map.keys()))
+            raise ValueError(
+                f"Invalid whisper layer_str '{args.layer_str}'. "
+                f"Use an integer block index or one of: {valid_names}"
+            )
+
+        whisper_layer_str = layer_name_map[layer_key]
+        config['model']['arch_kwargs']['time_average'] = (
+            False if args.time_avg_rep is None else args.time_avg_rep
+        )
     elif 'byol-a' in str(config_path):
         # init model and hparas dicts  for byola configs 
         config['model'] = {}
@@ -109,7 +115,7 @@ def cli_main(args):
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
     # used 2 gpus for training, mult by 2 for now to get same checkpoint 
-    if not use_whisper:  # Whisper doesn't use supervised_backbone flag
+    if not use_whisper:  # Whisper uses the SSL encoder backbone
         if 'model' not in config:
             config['model'] = {}
         if 'arch_kwargs' not in config['model']:
@@ -123,7 +129,7 @@ def cli_main(args):
     config['hparas']['epochs'] = args.train_epochs
     if 'arch_kwargs' not in config['model'].keys():
         config['model']['arch_kwargs'] = {}
-    if not use_whisper:  # Whisper doesn't use time_average
+    if not use_whisper:
         config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['crop_audio'] = args.crop_audio
 
@@ -214,17 +220,16 @@ def cli_main(args):
     
     w_noise_modifier = '_with_noise' if args.with_noise else ""
     
-    str_modifier = f"{task_str}_{args.layer_str.replace('.', '_')}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}{dropout_str}"
+    layer_component = whisper_layer_str if use_whisper else args.layer_str.replace('.', '_')
+    str_modifier = f"{task_str}_{layer_component}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}{dropout_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
-    if use_whisper:
-        module = WhisperTransferModule(config=config, ckpt_path=None)
-    elif use_byola:
+    if use_byola:
         module = BYOLAClassifier(config=config)
     else:
         module = SSLClassifier(config=config,
                             ckpt_path=ckpt_path,
-                            layer_out=args.layer_str,
+                            layer_out=whisper_layer_str if use_whisper else args.layer_str,
                             supervised_backbone=args.supervised_backbone)
 
     ## Check if existing classifier_ckpt exists 
@@ -263,11 +268,7 @@ def cli_main(args):
     callbacks.append(lr_monitor)
     # callbacks.append(EarlyStopping(monitor="train_classifier_loss", mode="min"))
 
-    if use_whisper:
-        # Use the whisper model type from config (e.g., "large-v3-turbo")
-        whisper_model_type = config['model'].get('whisper_model', 'large-v3-turbo')
-        log_basename = f'whisper_{whisper_model_type}'
-    elif use_byola:
+    if use_byola:
         log_basename = 'byol-a_base'
     else:
         log_basename = config_path.stem
@@ -436,7 +437,7 @@ if __name__ == "__main__":
     help="Number of CPUs for dataloader. (Default: 0)",
     )
     parser.add_argument('--random_seed', default=0, type=int, help='Random seed')
-    parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier ontop of.')
+    parser.add_argument('--layer_str', default='avgpool', type=str, help='Layer to fit classifier on top of. For whisper encoders, use "encoder_block_0", "conv1", "ln_post", or a block index.')
     parser.add_argument('--task', default='both', type=str, help='One of: ["both", "word", "speaker"]. Default is "both"')
     parser.add_argument('--optimizer', default='LARS', type=str, help='String for optimizer used.')
     parser.add_argument('--lr', default=0.2, type=float, help='Initial LR used.')
@@ -453,6 +454,7 @@ if __name__ == "__main__":
     parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     parser.add_argument('--train_epochs', default=3, type=int, help='Number of training epochs.')
+    parser.add_argument('--print_whisper_layers', action=BooleanOptionalAction, help='Print Whisper encoder layer map and exit.')
     parser.add_argument(
         '--checkpoint_every_n_steps',
         default=None,

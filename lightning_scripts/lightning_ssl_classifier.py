@@ -4,6 +4,7 @@ import lightning as L
 import re
 from typing import Union
 from lightning_ssl import LitAudioSSL 
+from whisper_encoder_arch import get_whisper_encoder_layer_sizes
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitAudioSupervised
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
@@ -32,6 +33,7 @@ class SSLClassifier(L.LightningModule):
         self.feature_extractor.freeze()
         # softcode size dict at some point 
         self.time_avg_rep = config['model']['arch_kwargs'].get('time_average', True)
+        self.is_whisper = config['model']['arch_kwargs'].get('backbone') == 'whisper' or 'whisper' in config['model'].get('arch_name', '')
         self.crop_audio = config.get('crop_audio', False)
         self.no_avgpool = config['model']['arch_kwargs'].get('no_avgpool', False)
         if self.crop_audio:
@@ -54,7 +56,10 @@ class SSLClassifier(L.LightningModule):
                 at.UnsqueezeAudio(dim=0) # dim=0 here so batches of audio from dataloader will be (Batch, 1, Time)
             ])
         
-        if config['model']['arch_kwargs']['backbone'] == 'kell2018' or 'kell2018' in config['model']['arch_name']:
+        if self.is_whisper:
+            encoder_kwargs = config['model']['arch_kwargs'].get('encoder_kwargs', {})
+            layer_size_dict = get_whisper_encoder_layer_sizes(encoder_kwargs, time_average=self.time_avg_rep)
+        elif config['model']['arch_kwargs']['backbone'] == 'kell2018' or 'kell2018' in config['model']['arch_name']:
             if self.time_avg_rep:
                 layer_size_dict = {'input_after_preproc': 211,
                                     'batchnorm0': 211,
