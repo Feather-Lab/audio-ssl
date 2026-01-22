@@ -22,10 +22,10 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 # Example: NSynth instrument family classification with kell2018
-    # --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
+    # --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
+    # --supervised_backbone \
 srun python3 lightning_scripts/eval_nsynth_linear.py \
-    --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
-    --supervised_backbone \
+    --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01.yaml \
     --gpus $num_gpus \
     --num_workers $SLURM_JOB_CPUS_PER_NODE \
     --model_ckpt_dir model_checkpoints \

@@ -41,10 +41,10 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 192 \
                                    --layer_str 'encoder_block_3' \
-                                   --optimizer "AdamW" --lr 0.0005 \
+                                   --optimizer "AdamW" --lr 0.005 \
                                    --task 'both' \
                                    --train_epochs 6 \
-                                   --with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
                                    
 # srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
 #                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \

@@ -123,33 +123,46 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
             raise ValueError(f"Unknown experiment_type: {self.experiment_type}")
 
     def _build_interval_match_triplet(self, interval: int, rng: random.Random) -> Dict[str, Dict]:
-        """Original behavior: anchor and positive share same interval and instrument, different start notes."""
-        instrument_to_starts: Dict[str, List[int]] = {}
+        """Interval match: same instrument; positive is transposed with same interval; negative uses a different interval size."""
+        anchor_interval_size = abs(interval)
+        candidate_negative_intervals = [
+            delta for delta in self.interval_choices if abs(delta) != anchor_interval_size
+        ]
+        if not candidate_negative_intervals:
+            raise RuntimeError("No negative interval choices available")
+
+        candidate_configs = []
         for inst in self.instruments:
             starts = self._valid_interval_starts(interval, inst)
-            if len(starts) >= 2:
-                instrument_to_starts[inst] = starts
-        if not instrument_to_starts:
-            raise RuntimeError(f"No instruments support interval {interval}")
-
-        instrument = rng.choice(list(instrument_to_starts.keys()))
-        starts = instrument_to_starts[instrument]
-        anchor_start = rng.choice(starts)
-        positive_start = rng.choice([p for p in starts if p != anchor_start])
-        anchor_target = anchor_start + interval
-        positive_target = positive_start + interval
-
-        candidate_neg = []
-        for delta in range(-self.max_interval, self.max_interval + 1):
-            if delta == 0 or delta == interval:
+            if len(starts) < 2:
                 continue
-            t_pitch = positive_start + delta
-            if self.min_midi <= t_pitch <= self.max_midi and instrument in self.pitch_instrument_to_ids.get(t_pitch, {}):
-                candidate_neg.append(delta)
-        if not candidate_neg:
-            raise RuntimeError("No negative interval available")
-        negative_interval = rng.choice(candidate_neg)
-        negative_target = positive_start + negative_interval
+            for anchor_start in starts:
+                for transposed_start in starts:
+                    if transposed_start == anchor_start:
+                        continue
+                    neg_intervals = []
+                    for delta in candidate_negative_intervals:
+                        target_pitch = transposed_start + delta
+                        if not (self.min_midi <= target_pitch <= self.max_midi):
+                            continue
+                        if inst in self.pitch_instrument_to_ids.get(target_pitch, {}):
+                            neg_intervals.append(delta)
+                    if neg_intervals:
+                        candidate_configs.append((inst, anchor_start, transposed_start, neg_intervals))
+
+        if not candidate_configs:
+            raise RuntimeError(f"No instruments support interval {interval} with valid negative intervals")
+
+        instrument, anchor_start, transposed_start, neg_intervals = rng.choice(candidate_configs)
+        negative_interval = rng.choice(neg_intervals)
+
+        anchor_target = anchor_start + interval
+        positive_start = transposed_start
+        positive_target = positive_start + interval
+        negative_start = transposed_start
+        negative_target = negative_start + negative_interval
+
+        positive_start_id = self._choose_file(positive_start, instrument, rng)
 
         triplet = {
             "anchor": {
@@ -157,6 +170,7 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
                 "start_pitch": anchor_start,
                 "target_pitch": anchor_target,
                 "interval": interval,
+                "interval_size": anchor_interval_size,
                 "start_id": self._choose_file(anchor_start, instrument, rng),
                 "target_id": self._choose_file(anchor_target, instrument, rng),
             },
@@ -165,19 +179,20 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
                 "start_pitch": positive_start,
                 "target_pitch": positive_target,
                 "interval": interval,
-                "start_id": self._choose_file(positive_start, instrument, rng),
+                "interval_size": anchor_interval_size,
+                "start_id": positive_start_id,
                 "target_id": self._choose_file(positive_target, instrument, rng),
             },
             "negative": {
                 "instrument": instrument,
-                "start_pitch": positive_start,
+                "start_pitch": negative_start,
                 "target_pitch": negative_target,
                 "interval": negative_interval,
-                "start_id": None,
+                "interval_size": abs(negative_interval),
+                "start_id": positive_start_id,
                 "target_id": self._choose_file(negative_target, instrument, rng),
             },
         }
-        triplet["negative"]["start_id"] = triplet["positive"]["start_id"]
         return triplet
 
     def _build_direction_match_triplet(self, interval: int, rng: random.Random) -> Dict[str, Dict]:

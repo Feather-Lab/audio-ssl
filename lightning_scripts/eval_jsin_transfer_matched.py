@@ -43,8 +43,10 @@ def cli_main(args):
     # Determine which model type to use
     use_whisper = False
     use_byola = False
+    # Only treat as pretrained whisper when explicitly requested.
+    use_whisper_pretrained = args.model_type == 'whisper'
     
-    if args.model_type == 'whisper':
+    if use_whisper_pretrained:
         use_whisper = True
     elif config.get('model', {}).get('arch_kwargs', {}).get('backbone') == 'whisper':
         use_whisper = True
@@ -312,7 +314,7 @@ def cli_main(args):
             labels[label_key] = torch.from_numpy(targets[label_key])
         return audio, labels
 
-    if use_whisper:
+    if use_whisper_pretrained:
         eval_collate_fn = module.eval_collate_fn
     elif 'byol-a' in str(config_path):
         eval_collate_fn = module.predict_collate_fn
