@@ -21,7 +21,7 @@ hparas:
   epochs: 250
   global_batch_size: 768 # for whisper tiny, 192 per GPU will fit 
   lambda_ssl: 1
-  lr: 0.2
+  lr: 0.02
   num_warmup_steps_or_ratio: 0.1
   optimizer: LARS
   ssl_loss: Paired_Loss

@@ -22,8 +22,18 @@ num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
 
-python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py --config_path model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
-                                #    --dir_name_modifier "latest_ckpt"
+python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py \
+    --config_path model_configs/whisper_pretrained_large-v3_natsounds.yaml \
+
+
+    # model_configs/whisper_pretrained_large-v3-turbo_natsounds.yaml \
+# for config_path in \
+#     model_configs/whisper_pretrained_large-v3_natsounds.yaml \
+#     model_configs/whisper_pretrained_medium_natsounds.yaml \
+#     model_configs/whisper_pretrained_tiny.en_natsounds.yaml; do
+#     python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py \
+#         --config_path "${config_path}"
+# done
 
 
 

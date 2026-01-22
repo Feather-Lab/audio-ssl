@@ -1,0 +1,10 @@
+val_metric: 'val_acc' # unused for feature extraction
+val_metric_mode: 'max'
+
+model:
+  arch_name: whisper_pretrained
+  use_whisper_pretrained: true
+  whisper_model: medium
+  whisper_n_time_tokens: 100
+  arch_kwargs:
+    encoder_layer: 23

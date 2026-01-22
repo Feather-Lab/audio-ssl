@@ -54,6 +54,7 @@ import pathlib
 import yaml
 
 import torch
+import whisper
 from lightning_scripts.byola_lightning_module import BYOLAModule
 from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_scripts.lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
@@ -91,18 +92,43 @@ def cli_main(args):
 
     print(f"Features from config: {config_path}")
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+    use_pretrained_whisper = bool(config.get('model', {}).get('use_whisper_pretrained', False))
 
     ############Get model checkpoint############
-    if args.ckpt_path == "" and 'byol' not in str(config_path):
+    if use_pretrained_whisper:
+        ckpt_path = ''
+    elif args.ckpt_path == "" and 'byol' not in str(config_path):
         checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
         ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
         ckpt_path = ckpt_paths[-1] # get latest checkpoint 
     else:
         ckpt_path = args.ckpt_path
-    print(f"Features from checkpoint: {ckpt_path}")
+    if ckpt_path:
+        print(f"Features from checkpoint: {ckpt_path}")
 
     ############LOAD NETWORK############
-    if "supervised" in str(config_path):
+    if use_pretrained_whisper:
+        whisper_model_name = config.get('model', {}).get('whisper_model', 'large-v3-turbo')
+        whisper_model = whisper.load_model(whisper_model_name)
+        whisper_encoder = whisper_model.encoder.eval().cuda()
+        for param in whisper_encoder.parameters():
+            param.requires_grad = False
+        n_mels = whisper_model.dims.n_mels
+        n_time_tokens = config.get('model', {}).get('whisper_n_time_tokens', 100)
+        num_layers = len(whisper_encoder.blocks)
+        all_layers = [f"encoder_block_{idx}" for idx in range(num_layers)] + ["ln_post"]
+        whisper_layer_outputs = {}
+
+        def _make_whisper_hook(layer_key):
+            def hook_fn(_module, _inputs, outputs):
+                layer_out = outputs[0] if isinstance(outputs, tuple) else outputs
+                whisper_layer_outputs[layer_key] = layer_out
+            return hook_fn
+
+        for idx, block in enumerate(whisper_encoder.blocks):
+            block.register_forward_hook(_make_whisper_hook(f"encoder_block_{idx}"))
+        model = whisper_encoder
+    elif "supervised" in str(config_path):
         module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         model = module.model.eval().cuda()
     elif 'byol' in str(config_path):
@@ -112,12 +138,15 @@ def cli_main(args):
     else:
         module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         model = module.model.eval().cuda()
-    all_layers = module.metamer_layers
+    if not use_pretrained_whisper:
+        all_layers = module.metamer_layers
 
     ##############Begin Define Parameters#################
     save_features_dir = pathlib.Path(args.save_features_dir)
     model_name_modfier = f"_{args.dir_name_modifier}" if args.dir_name_modifier != '' else ''
-    if 'byol' in str(config_path):
+    if use_pretrained_whisper:
+        save_features_dir = save_features_dir / f"whisper_{config.get('model', {}).get('whisper_model', 'pretrained')}{model_name_modfier}"
+    elif 'byol' in str(config_path):
         save_features_dir = save_features_dir / f"byol-a{model_name_modfier}"
     else:
         save_features_dir = save_features_dir / f"{config_path.stem}{model_name_modfier}"
@@ -130,7 +159,7 @@ def cli_main(args):
 
     wavs_location = os.path.join(fMRI_DATA_PATH, '165_natural_sounds')
 
-    SR=16000 if 'byol' in str(config_path) else 20000 # Match with the networks we are building/training
+    SR=16000 if ('byol' in str(config_path) or use_pretrained_whisper) else 20000 # Match with the networks we are building/training
     MEASURE_DUR=2
     wav_array = np.empty([165, SR*MEASURE_DUR])
     for wav_idx, wav_data in enumerate(sound_list):
@@ -158,14 +187,24 @@ def cli_main(args):
 
     for sound_idx, sound_info in enumerate(sound_list):
         ## Could probably process all sounds at once...
-        sound, _ = transforms(wav_array[sound_idx,:], None)
-        sound = sound.float().cuda()
+        if use_pretrained_whisper:
+            sound = torch.from_numpy(wav_array[sound_idx, :]).float().unsqueeze(0)
+            sound = whisper.pad_or_trim(sound)
+            mel = whisper.log_mel_spectrogram(sound, n_mels=n_mels).cuda()
+            whisper_layer_outputs.clear()
+            with torch.no_grad():
+                encoder_out = model(mel)
+            layer_returns = dict(whisper_layer_outputs)
+            layer_returns["ln_post"] = encoder_out
+        else:
+            sound, _ = transforms(wav_array[sound_idx,:], None)
+            sound = sound.float().cuda()
 
-        with torch.no_grad():
-            if 'byol' in str(config_path):
-                layer_returns = model(sound) 
-            else:
-                predictions, rep, layer_returns = model(sound, with_latent=True) # Corresponding representation
+            with torch.no_grad():
+                if 'byol' in str(config_path):
+                    layer_returns = model(sound) 
+                else:
+                    predictions, rep, layer_returns = model(sound, with_latent=True) # Corresponding representation
 
         # Make the array have the correct size
         if sound_idx == 0:
@@ -175,11 +214,15 @@ def cli_main(args):
                     layer_shape_165 = layer_returns.shape
                 else:
                     layer_shape_165 = layer_returns[layer].shape
-                layer_shape_full = np.prod(np.array(layer_shape_165))
-                if len(layer_shape_165)==4:
-                    layer_shape_unraveled = layer_shape_165[1]*layer_shape_165[2]# don't take the time dimension into account
+                if use_pretrained_whisper and len(layer_shape_165) == 3:
+                    layer_shape_full = n_time_tokens * layer_shape_165[2]
+                    layer_shape_unraveled = layer_shape_165[2]
                 else:
-                    layer_shape_unraveled = layer_shape_165[1]
+                    layer_shape_full = np.prod(np.array(layer_shape_165))
+                    if len(layer_shape_165)==4:
+                        layer_shape_unraveled = layer_shape_165[1]*layer_shape_165[2]# don't take the time dimension into account
+                    else:
+                        layer_shape_unraveled = layer_shape_165[1]
                 net_layer_dict_full[layer] = net_h5py_file_full.create_dataset(layer, (165, layer_shape_full), dtype='float32')
                 net_layer_dict[layer] = net_h5py_file.create_dataset(layer, (165, layer_shape_unraveled), dtype='float32')
 
@@ -188,10 +231,14 @@ def cli_main(args):
                 layer_rep = layer_returns
             else:
                 layer_rep = layer_returns[layer] 
+            if use_pretrained_whisper:
+                layer_rep = layer_rep[:, :n_time_tokens, :]
 
             # time averaged features, so that they can be related to the fMRI activations
             if layer_rep.ndim==4: # NCHW (W is time)
                 net_layer_dict[layer][sound_idx,:] = np.mean(layer_rep.cpu().detach().numpy(),3).ravel()
+            elif layer_rep.ndim==3: # NTCHW (T is time)
+                net_layer_dict[layer][sound_idx,:] = np.mean(layer_rep.cpu().detach().numpy(),1).ravel()
             else: # fully connected layers do not have a temporal component.  
                 net_layer_dict[layer][sound_idx,:] = layer_rep.cpu().detach().numpy().ravel()
             net_layer_dict_full[layer][sound_idx,:] = layer_rep.cpu().detach().numpy().ravel()
