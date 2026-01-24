@@ -18,7 +18,7 @@ data:
   val_noise_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5
   val_speech_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5
 hparas:
-  epochs: 250
+  epochs: 100
   global_batch_size: 640
   lambda_ssl: 1
   lr: 0.2
