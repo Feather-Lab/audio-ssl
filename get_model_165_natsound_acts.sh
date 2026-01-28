@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-gpu=2
 #SBATCH --gpus=1
 
-#SBATCH --mem=8Gb
+#SBATCH --mem=64Gb
 #SBATCH --time=00:10:00
 #SBATCH --partition=gpu
 #SBATCH -N 1

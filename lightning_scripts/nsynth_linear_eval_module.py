@@ -8,12 +8,16 @@ import torch
 import torch.nn as nn
 import lightning as L
 import whisper
+import torchaudio
+import sys
 from typing import Union, Optional
 from lightning_ssl_classifier import SSLClassifier
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import torch.nn.functional as F
 from nsynth_dataset import NsynthDataset
+
+from byola_lightning_module import BYOLAModule
 
 
 class NSynthLinearEvalModule(L.LightningModule):
@@ -40,6 +44,7 @@ class NSynthLinearEvalModule(L.LightningModule):
         fade_window_duration: float = 0.01,
         sample_rate: int = 20000,
         use_whisper: bool = False,
+        use_byola: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -62,10 +67,20 @@ class NSynthLinearEvalModule(L.LightningModule):
         if 'arch_kwargs' not in self.config['model']:
             self.config['model']['arch_kwargs'] = {}
         self.use_whisper = use_whisper or bool(self.config['model'].get('whisper_model'))
+        self.use_byola = use_byola or bool(self.config['model'].get('byola_arch'))
         
         if self.use_whisper:
             self._init_whisper_encoder()
             feature_dim = self.classifier_input_dim
+            self.feature_extractor_wrapper = None
+        elif self.use_byola:
+            # Use BYOLAModule directly (same as speech_commands)
+            # Initialize on CPU first, Lightning will move to GPU
+            self.byola_module = BYOLAModule(config=config)
+            # Move to device if available (Lightning will handle this, but do it here for safety)
+            if torch.cuda.is_available():
+                self.byola_module = self.byola_module.cuda()
+            feature_dim = 2048  # BYOL-A final output dimension
             self.feature_extractor_wrapper = None
         else:
             # Create a config for SSLClassifier that matches our needs
@@ -187,7 +202,31 @@ class NSynthLinearEvalModule(L.LightningModule):
         time_avg_rep = arch_config.get('time_average', True)
         no_avgpool = arch_config.get('no_avgpool', False)
         
-        if backbone == 'kell2018' or 'kell2018' in str(backbone):
+        # Check for BYOL-A (AudioNTT2020)
+        if backbone == 'AudioNTT2020' or 'byol' in str(backbone).lower() or 'byola' in str(backbone).lower():
+            # BYOL-A layer sizes (from SSLClassifier)
+            if time_avg_rep:
+                layer_size_dict = {
+                    'input_after_preproc': 211,
+                    'relu0': 5256960,
+                    'relu1': 1310400,
+                    'relu2': 323584,
+                    'relu3': 98304,
+                    'relu4': 98304,
+                    'final': 2048
+                }
+            else:
+                # For non-time-averaged, use the same sizes (time dimension is flattened)
+                layer_size_dict = {
+                    'input_after_preproc': 211,
+                    'relu0': 5256960,
+                    'relu1': 1310400,
+                    'relu2': 323584,
+                    'relu3': 98304,
+                    'relu4': 98304,
+                    'final': 2048
+                }
+        elif backbone == 'kell2018' or 'kell2018' in str(backbone):
             if time_avg_rep:
                 layer_size_dict = {
                     'input_after_preproc': 211,
@@ -335,6 +374,15 @@ class NSynthLinearEvalModule(L.LightningModule):
     
     def _extract_ssl_features(self, x):
         """Extract features using SSL backbone."""
+        if self.use_byola:
+            # Use BYOLAModule directly (same as speech_commands)
+            # Input x is (batch, 1, time) or (batch, time) - raw audio
+            if x.dim() == 3:
+                x = x.squeeze(1)  # (batch, 1, time) -> (batch, time)
+            activations = self.byola_module(x)
+            # BYOL-A outputs are already time-averaged to [batch, 2048]
+            return activations
+        
         # Use SSLClassifier's forward to get features
         with torch.no_grad():
             if self.feature_extractor_wrapper.byola_arch:

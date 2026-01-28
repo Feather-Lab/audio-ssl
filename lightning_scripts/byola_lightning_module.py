@@ -32,7 +32,9 @@ class BYOLAModule(L.LightningModule):
 
         # Load pretrained weights.
         self.model = AudioNTT2020(d=self.config.feature_d)
-        self.model.load_weight('byol-a/pretrained_weights/AudioNTT2020-BYOLA-64x96d2048.pth', self.device)
+        # Determine device - use CPU for loading, Lightning will move to GPU later
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.load_weight('byol-a/pretrained_weights/AudioNTT2020-BYOLA-64x96d2048.pth', device)
         self.model = self.model.eval()
         # Need to manually freeze params here 
         self.model.trainable = False
@@ -43,6 +45,12 @@ class BYOLAModule(L.LightningModule):
 
     def forward(self, x):
         with torch.no_grad():
-            x = self.normalizer((self.to_melspec(x) + torch.finfo(torch.float).eps).log())
-            activations = self.model(x)
+            # Convert audio to mel spectrogram: (batch, time) -> (batch, mel, time)
+            mel = self.to_melspec(x)
+            # Normalize: (batch, mel, time)
+            mel_norm = self.normalizer((mel + torch.finfo(torch.float).eps).log())
+            # Add channel dimension: (batch, mel, time) -> (batch, 1, mel, time)
+            mel_norm = mel_norm.unsqueeze(1)
+            # Forward through model: (batch, 1, mel, time) -> (batch, time, d) -> (batch, d) after pooling
+            activations = self.model(mel_norm)
         return activations

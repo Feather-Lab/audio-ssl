@@ -1,7 +1,7 @@
 #!/bin/bash -l
-#SBATCH --job-name=eval_nsynth_kell2018
-#SBATCH --output=outLogs/eval_nsynth_kell2018_%A_%a.out
-#SBATCH --error=outLogs/eval_nsynth_kell2018_%A_%a.err
+#SBATCH --job-name=eval_nsynth_byola
+#SBATCH --output=outLogs/eval_nsynth_byola_%A_%a.out
+#SBATCH --error=outLogs/eval_nsynth_byola_%A_%a.err
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
@@ -21,23 +21,20 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-# Example: NSynth instrument family classification with kell2018
-    # --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
+# NSynth instrument family classification with pre-trained BYOL-A
 srun python3 lightning_scripts/eval_nsynth_linear.py \
-    --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
-    --supervised_backbone \
+    --config_path byol-a/config.yaml \
     --gpus $num_gpus \
     --num_workers $SLURM_JOB_CPUS_PER_NODE \
     --model_ckpt_dir model_checkpoints \
     --batch_size 256 \
-    --layer_str 'relu4' \
+    --layer_str 'final' \
     --optimizer "AdamW" \
     --lr 0.005 \
     --task 'family' \
     --train_epochs 10 \
-    --duration 2.0 \
-    --no-time_avg_rep \
+    --duration 1.0 \
+    --time_avg_rep \
     --no-lr_scheduler \
     --no-eval_only \
-    --no-use_classifier_ckpt 
-
+    --no-use_classifier_ckpt

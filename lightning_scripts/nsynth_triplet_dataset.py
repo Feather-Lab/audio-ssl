@@ -49,7 +49,6 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
         self.max_interval = max_interval
         self.min_midi = min_midi
         self.max_midi = max_midi
-        self.experiment_type = experiment_type
         self.balance_eval = balance_eval
         self.balance_by_family = balance_by_family
 
@@ -58,13 +57,20 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
             "direction_match",
             "direction_transpose",
             "timbre_order_match",
+            "melody_match",
             "instrument_match",
         ]:
             raise ValueError(
                 "experiment_type must be 'interval_match', 'direction_match', "
-                "'direction_transpose', 'timbre_order_match', or "
+                "'direction_transpose', 'timbre_order_match', 'melody_match', or "
                 f"'instrument_match', got {experiment_type}"
             )
+        
+        # Map melody_match to timbre_order_match for backward compatibility
+        if experiment_type == "melody_match":
+            experiment_type = "timbre_order_match"
+        
+        self.experiment_type = experiment_type
 
         self.metadata_path = self.nsynth_root / f"nsynth-{split}" / "examples.json"
         self.audio_dir = self.nsynth_root / f"nsynth-{split}" / "audio"

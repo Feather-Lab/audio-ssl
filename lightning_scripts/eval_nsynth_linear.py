@@ -41,6 +41,15 @@ def cli_main(args):
     
     print(f"Evaluating config: {config_path}")
     
+    # Check if this is BYOL-A (pre-trained, no checkpoint needed)
+    use_byola = args.encoder_type == 'byola' or 'byol-a' in str(config_path).lower() or 'byola' in str(config_path).lower()
+    
+    # Handle BYOL-A config setup (same as speech_commands) - must happen before accessing config values
+    if use_byola:
+        config['model'] = {}
+        config['hparas'] = {}
+        config['model']['arch_kwargs'] = {}
+    
     # Update config for transfer learning task
     config['num_workers'] = args.num_workers
     config['num_gpus'] = args.gpus
@@ -108,7 +117,8 @@ def cli_main(args):
         config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['hparas']['lr_schedule'] = args.lr_scheduler
     
-    target_sample_rate = 16000 if use_whisper else 20000
+    # BYOL-A uses 16kHz, Whisper uses 16kHz, others use 20kHz
+    target_sample_rate = 16000 if (use_whisper or use_byola) else 20000
 
     # Get NSynth dataset to determine num_classes
     train_dataset = NsynthDataset(
@@ -138,25 +148,7 @@ def cli_main(args):
         }
     }
     
-    # Get checkpoint for encoder if needed
-    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-    if use_whisper:
-        ckpt_path = None
-        ckpt_modifier = '_whisper'
-    else:
-        if args.ckpt_path == "":
-            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-            if len(ckpt_paths) > 0:
-                ckpt_path = ckpt_paths[-1]  # get latest checkpoint
-                print(f"Using checkpoint: {ckpt_path}")
-            else:
-                raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-            ckpt_modifier = ''
-        else:
-            ckpt_path = args.ckpt_path
-            ckpt_modifier = '_from_best_val_ckpt'
-    
-    # Build modifier string for checkpoint naming
+    # Build modifier string for checkpoint naming (same pattern as speech_commands)
     time_avg_str = ""
     if not use_whisper and not args.time_avg_rep:
         time_avg_str = "full_rep_"
@@ -173,19 +165,38 @@ def cli_main(args):
     if args.with_dropout:
         dropout_str = "_w_dropout"
     
+    # Get checkpoint for encoder if needed (same pattern as speech_commands)
+    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
+    if use_whisper:
+        ckpt_path = None
+        ckpt_modifier = '_whisper'
+    elif use_byola:
+        # For pre-trained BYOL-A, no checkpoint is needed
+        ckpt_path = None
+        ckpt_modifier = ''
+    else:
+        if args.ckpt_path == "":
+            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+            if len(ckpt_paths) > 0:
+                ckpt_path = ckpt_paths[-1]  # get latest checkpoint
+                print(ckpt_path)
+            ckpt_modifier = ''
+        else:
+            ckpt_path = args.ckpt_path
+            ckpt_modifier = '_from_best_val_ckpt'
+    
     layer_component = (
         f"whisper_layer_{config['model']['arch_kwargs']['encoder_layer']}"
         if use_whisper else args.layer_str.replace('.', '_')
     )
     str_modifier = (
-        f"{args.task}_{layer_component}_{time_avg_str}"
-        f"{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}"
-        f"{mlp_str}{ckpt_modifier}{dropout_str}"
+        f"{config['hparas']['optimizer']}_{layer_component}_{time_avg_str}"
+        f"{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{dropout_str}"
     )
     
     classifier_checkpoint_dir = (
         pathlib.Path(args.model_ckpt_dir) / 
-        f"{config_path.stem}/nsynth_linear_classifier_checkpoints_{str_modifier}"
+        f"{config_path.stem}/nsynth_linear_classifier_checkpoints/{str_modifier}"
     )
     
     # Initialize NSynth linear eval module
@@ -205,6 +216,7 @@ def cli_main(args):
         fade_window_duration=args.fade_window_duration,
         sample_rate=target_sample_rate,
         use_whisper=use_whisper,
+        use_byola=use_byola,
     )
     
     # Check if existing classifier checkpoint exists
