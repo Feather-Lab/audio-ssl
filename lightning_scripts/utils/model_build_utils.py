@@ -12,7 +12,18 @@ exp_dir = Path("/mnt/home/igriffith/ceph/projects/cochdnn/model_checkpoints")
 
 def get_checkpoint_path(config_path: Path, exp_dir: Path = exp_dir) -> str:  
     checkpoint_dir = exp_dir / f"{config_path.stem}/checkpoints"
-    checkpoint_path = str(sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)[-1])
+    all_checkpoints = list(checkpoint_dir.glob("*.ckpt"))
+    
+    # First try to find checkpoints with "best_val" in the name
+    best_val_checkpoints = [ckpt for ckpt in all_checkpoints if "best_val" in ckpt.name]
+    
+    if best_val_checkpoints:
+        # Return the latest best_val checkpoint
+        checkpoint_path = str(sorted(best_val_checkpoints, key=os.path.getctime)[-1])
+    else:
+        # Fall back to latest checkpoint overall
+        checkpoint_path = str(sorted(all_checkpoints, key=os.path.getctime)[-1])
+    
     return checkpoint_path
 
 
