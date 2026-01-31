@@ -237,9 +237,9 @@ class SSLClassifier(L.LightningModule):
                 predictions, rep, all_outputs = self.feature_extractor.model(x,  with_latent=True, fake_relu=False)
                 activations = all_outputs[self.layer_out]
             if self.time_avg_rep:
-                activations = activations.mean(dim=-1).view(activations.shape[0], -1)
+                activations = activations.mean(dim=-1).reshape(activations.shape[0], -1)
             else:
-                activations = activations.view(activations.shape[0], -1)
+                activations = activations.reshape(activations.shape[0], -1)
                 # time average then flatten
             activations = activations.detach()
         if self.dropout:

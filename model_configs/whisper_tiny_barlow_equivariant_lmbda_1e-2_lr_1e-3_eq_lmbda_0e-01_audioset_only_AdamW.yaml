@@ -1,0 +1,61 @@
+audio_rep:
+  name: cochleagram_1
+  on_gpu: true
+audio_transforms:
+  dbspl: 60
+  high_snr: 10
+  low_snr: -10
+data:
+  dataset: MatchedAudiosetBatched
+  noise_h5_path: /mnt/home/igriffith/ceph/datasets/audioset/unbalanced_train_segments.hdf5
+  blocked_batches: true
+  signal_augment: true
+  target_keys:
+  - noise/labels_int
+  val_noise_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5
+  val_speech_h5_path: /mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5
+hparas:
+  epochs: 100
+  global_batch_size: 768 # for whisper tiny, 192 per GPU will fit 
+  lambda_ssl: 1
+  lr: 0.001
+  num_warmup_steps_or_ratio: 0.1
+  optimizer: AdamW
+  ssl_loss: Paired_Loss
+  ssl_loss_kwargs:
+    lmda: 0.0
+    loss_fn_eq: Barlow_Loss
+    loss_fn_eq_kwargs:
+      lmbda: 0.01
+      out_dim: 512
+    loss_fn_inv: Barlow_Loss
+    loss_fn_inv_kwargs:
+      lmbda: 0.01
+      out_dim: 512
+  ssl_loss_str: paired
+  ssl_task: dual
+  task_loss_params:
+    noise/labels_int:
+      loss_type: bcewithlogitsloss
+      weight: 1.0
+  valid_step: 5000
+model:
+  arch_kwargs:
+    backbone: whisper
+    encoder_kwargs:
+      n_mels: 211
+      n_ctx: 195
+      n_state: 384
+      n_head: 6
+      n_layer: 4
+    num_classes:
+      noise/labels_int: 527
+    proj_out_dim: 74880
+    projector_dims:
+    - 512
+    - 512
+    supervised: true
+  arch_name: SSLBaseModelDualTask
+val_metric:
+  audioset_task: val_noise/labels_int_prec
+val_metric_mode: max

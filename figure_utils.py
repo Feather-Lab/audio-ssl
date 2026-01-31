@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import pandas as pd
 import seaborn as sns
 
 
@@ -138,8 +139,10 @@ def normalize_model_name(model_name):
     name = re.sub(r'\bscaled ssl\b\s+eq\b', 'scaled ssl', name, flags=re.IGNORECASE)
     name = re.sub(r'\bssl\b\s+eq\b', 'ssl', name, flags=re.IGNORECASE)
 
-    name = re.sub(r'\bCochDNN9\b\s+ssl\s+word\b', 'CochDNN9 ssl λ=0.0', name, flags=re.IGNORECASE)
-    name = re.sub(r'\bCochDNN9\b\s+ssl\s+audioset\b', 'CochDNN9 ssl λ=1.0', name, flags=re.IGNORECASE)
+    # Apply SSL normalization rules to all architectures (CochDNN9, resnet18, resnet50, etc.)
+    # Match any architecture prefix followed by ssl word/audioset
+    name = re.sub(r'\b(CochDNN9|resnet\d+)\b\s+ssl\s+word\b', r'\1 ssl λ=0.0', name, flags=re.IGNORECASE)
+    name = re.sub(r'\b(CochDNN9|resnet\d+)\b\s+ssl\s+audioset\b', r'\1 ssl λ=1.0', name, flags=re.IGNORECASE)
 
     if 'supervised' in name and 'jsin' in name and 'audioset' in name:
         name = re.sub(
@@ -201,32 +204,119 @@ def _palette_for_lambdas_matching(hue_order, match_fn, palette_name):
     if not names:
         return {}
     lambdas = sorted({float(_parse_lambda_value(n)) for n in names if _parse_lambda_value(n) is not None})
+    if not lambdas:
+        return {}
     colors = sns.color_palette(palette_name, n_colors=max(len(lambdas), 2))
     color_map = dict(zip(lambdas, colors))
-    return {n: color_map[_parse_lambda_value(n)] for n in names if _parse_lambda_value(n) is not None}
+    result = {}
+    for n in names:
+        lambda_val = _parse_lambda_value(n)
+        if lambda_val is not None and lambda_val in color_map:
+            result[n] = color_map[lambda_val]
+    return result
 
 
 def build_model_palette(hue_order, base_colors=None):
     base = dict(base_colors or {})
     palette = {}
-
-    palette.update(
-        _palette_for_lambdas_matching(
-            hue_order,
-            lambda n: ' ssl ' in n and 'scaled ssl' not in n and 'ssl dual' not in n,
-            'Greens',
-        )
-    )
-    palette.update(_palette_for_lambdas_matching(hue_order, lambda n: 'scaled ssl' in n, 'Purples'))
-    palette.update(_palette_for_lambdas_matching(hue_order, lambda n: 'ssl dual' in n, 'Blues'))
-    palette.update(_palette_for_lambdas_matching(hue_order, lambda n: n.startswith('resnet') and 'ssl' in n, 'RdPu'))
-
-
+    
+    # Initialize palette with base colors for models that have them
     for name in hue_order:
         if name in base:
             palette[name] = base[name]
 
-    return palette
+    # Handle resnet SSL models (with lambda) - must come before general SSL check
+    # Check for ' ssl ' with spaces to avoid matching 'scaled ssl'
+    resnet_ssl = _palette_for_lambdas_matching(
+        hue_order, 
+        lambda n: n.startswith('resnet') and ' ssl ' in n and 'scaled ssl' not in n and 'ssl dual' not in n,
+        'RdPu'
+    )
+    palette.update(resnet_ssl)
+    
+    # Handle general SSL models (excluding resnet and already handled models)
+    general_ssl = _palette_for_lambdas_matching(
+        hue_order,
+        lambda n: ' ssl ' in n and 'scaled ssl' not in n and 'ssl dual' not in n and not n.startswith('resnet'),
+        'Greens',
+    )
+    palette.update(general_ssl)
+    
+    # Handle scaled SSL models - separate by architecture
+    # Scaled SSL for CochDNN9 - use Purples
+    cochdnn9_scaled_ssl = _palette_for_lambdas_matching(
+        hue_order, 
+        lambda n: 'scaled ssl' in n and n.startswith('CochDNN9'),
+        'Purples'
+    )
+    palette.update(cochdnn9_scaled_ssl)
+    
+    # Scaled SSL for resnet - use YlOrRd (yellow-orange-red) to differentiate from Purples
+    resnet_scaled_ssl = _palette_for_lambdas_matching(
+        hue_order, 
+        lambda n: 'scaled ssl' in n and n.startswith('resnet'),
+        'YlOrRd'
+    )
+    palette.update(resnet_scaled_ssl)
+    
+    # Handle SSL dual models
+    ssl_dual = _palette_for_lambdas_matching(
+        hue_order, 
+        lambda n: 'ssl dual' in n,
+        'Blues'
+    )
+    palette.update(ssl_dual)
+    
+    # Handle supervised CochDNN9 models that aren't in base_colors
+    cochdnn9_supervised = [n for n in hue_order if n.startswith('CochDNN9') and 'supervised' in n and n not in palette]
+    if cochdnn9_supervised:
+        # Use a different palette for supervised CochDNN9 models not in base_colors
+        colors = sns.color_palette('Blues', n_colors=max(len(cochdnn9_supervised), 2))
+        for i, name in enumerate(cochdnn9_supervised):
+            palette[name] = colors[i % len(colors)]
+    
+    # Handle supervised resnet models (they don't have lambda, so need special handling)
+    resnet_supervised = [n for n in hue_order if n.startswith('resnet') and 'supervised' in n and n not in palette]
+    if resnet_supervised:
+        # Use a different palette for supervised resnet models
+        colors = sns.color_palette('Oranges', n_colors=max(len(resnet_supervised), 2))
+        for i, name in enumerate(resnet_supervised):
+            palette[name] = colors[i % len(colors)]
+    
+    # Handle any other resnet models that don't have lambda (fallback)
+    resnet_other = [n for n in hue_order if n.startswith('resnet') and n not in palette]
+    if resnet_other:
+        colors = sns.color_palette('RdPu', n_colors=max(len(resnet_other), 2))
+        for i, name in enumerate(resnet_other):
+            palette[name] = colors[i % len(colors)]
+    
+    # Handle any other CochDNN9 models that don't have lambda (fallback)
+    cochdnn9_other = [n for n in hue_order if n.startswith('CochDNN9') and n not in palette]
+    if cochdnn9_other:
+        colors = sns.color_palette('Greens', n_colors=max(len(cochdnn9_other), 2))
+        for i, name in enumerate(cochdnn9_other):
+            palette[name] = colors[i % len(colors)]
+
+    # Ensure ALL models in hue_order have a color (final fallback to gray)
+    # This is the absolute final check - every model MUST have a color
+    for name in hue_order:
+        if name not in palette:
+            palette[name] = '#444444'
+    
+    # Final validation: ensure palette has all keys from hue_order
+    missing = set(hue_order) - set(palette.keys())
+    if missing:
+        # This should never happen, but if it does, assign gray to missing models
+        for name in missing:
+            palette[name] = '#444444'
+    
+    # Double-check: ensure we have exactly the right keys
+    # Add any missing keys and remove any extra keys (though we shouldn't have extra)
+    final_palette = {}
+    for name in hue_order:
+        final_palette[name] = palette.get(name, '#444444')
+    
+    return final_palette
 
 
 def format_model_str(path):
@@ -259,6 +349,9 @@ def format_model_str(path):
         lambda_match = re.search(r'eq_lmbda_([-\d.e]+)', path_str)
         if lambda_match:
             eq_lambda = str(float(lambda_match.group(1)))
+    # For resnet models with invariant_only, set lambda to 0.0 if no eq_lmbda found
+    elif 'invariant_only' in path_str and arch.startswith('resnet'):
+        eq_lambda = '0.0'
 
     task_parts = []
     if is_ssl:
@@ -332,6 +425,9 @@ def format_model_str_word_task(path):
         lambda_match = re.search(r'eq_lmbda_([-\d.e]+)', path_root)
         if lambda_match:
             eq_lambda = str(float(lambda_match.group(1)))
+    # For resnet models with invariant_only, set lambda to 0.0 if no eq_lmbda found
+    elif 'invariant_only' in full_path_str and arch.startswith('resnet'):
+        eq_lambda = '0.0'
 
     task_parts = []
     if is_ssl:
@@ -500,7 +596,9 @@ def pointplot_by_model(
     )
 
 
-def plot_grouped_bars(ax, data, value_col, title, ylabel, hue_order=None, hue_dict=None):
+def plot_grouped_bars(ax, data, value_col, title, ylabel, xlabel='Model Group', hue_order=None, hue_dict=None, 
+                      error_col=None, error_type=None, yerr=None, capsize=4, 
+                      bar_width=0.18, group_gap=0.6):
     """
     Create grouped bar plot with model groups (Supervised, SSL, Scaled SSL, BYOL-A).
     
@@ -512,6 +610,12 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, hue_order=None, hue_di
         ylabel: Y-axis label
         hue_order: Optional normalized hue_order. If None, uses standard.
         hue_dict: Optional color palette dict. If None, builds from standard colors.
+        error_col: Optional column name containing error values. If provided, these will be used.
+        error_type: Optional string ('std' or 'sem') to calculate error bars from data.
+                   If 'std', uses standard deviation. If 'sem', uses standard error of the mean.
+        yerr: Optional array/Series of error values. If provided, these will be used directly.
+              Should be indexed by model_name to match means.
+        capsize: Size of error bar caps (default: 4)
     
     Returns:
         Tuple of (legend_handles, legend_labels)
@@ -524,9 +628,33 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, hue_order=None, hue_di
     
     means = (data.groupby('model_name', as_index=True)[value_col].mean())
     
+    # Calculate error bars if requested
+    errors = None
+    if yerr is not None:
+        # Use provided error values directly
+        if hasattr(yerr, 'index'):
+            errors = yerr
+        else:
+            # Convert to Series with same index as means
+            errors = pd.Series(yerr, index=means.index)
+    elif error_col is not None:
+        # Use error values from specified column
+        errors = (data.groupby('model_name', as_index=True)[error_col].mean())
+    elif error_type is not None:
+        # Calculate error from data
+        if error_type == 'std':
+            errors = (data.groupby('model_name', as_index=True)[value_col].std())
+        elif error_type == 'sem':
+            # Standard error of the mean
+            stds = (data.groupby('model_name', as_index=True)[value_col].std())
+            counts = (data.groupby('model_name', as_index=True)[value_col].count())
+            errors = stds / (counts ** 0.5)
+        else:
+            raise ValueError(f"error_type must be 'std' or 'sem', got '{error_type}'")
+    
     plot_groups = get_plot_groups(hue_order)
     
-    bar_width = 0.18
+    bar_width = bar_width
     group_gap = 0.6
     
     xticks = []
@@ -545,15 +673,25 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, hue_order=None, hue_di
             x = x_cursor + i * bar_width
             color = hue_dict.get(model, '#444444')
             label = model_label(model)
-            bar = ax.bar(
-                x,
-                means.loc[model],
-                width=bar_width,
-                color=color,
-                edgecolor='black',
-                linewidth=0.6,
-                label=label,
-            )
+            
+            # Get error value for this model if errors are provided
+            error_val = None
+            if errors is not None and model in errors.index:
+                error_val = errors.loc[model]
+            
+            # Build bar arguments, only include yerr and capsize if error_val is provided
+            bar_kwargs = {
+                'width': bar_width,
+                'color': color,
+                'edgecolor': 'black',
+                'linewidth': 0.6,
+                'label': label,
+            }
+            if error_val is not None:
+                bar_kwargs['yerr'] = error_val
+                bar_kwargs['capsize'] = capsize
+            
+            bar = ax.bar(x, means.loc[model], **bar_kwargs)
             legend_handles.append(bar[0])
             legend_labels.append(label)
         
@@ -565,7 +703,7 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, hue_order=None, hue_di
     ax.set_xticks(xticks)
     ax.set_xticklabels(xticklabels)
     ax.set_ylabel(ylabel)
-    ax.set_xlabel('Model Group')
+    ax.set_xlabel(xlabel)
     ax.set_title(title)
     
     return legend_handles, legend_labels

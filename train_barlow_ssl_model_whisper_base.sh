@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=16
 
 #SBATCH --mem=1000Gb
-#SBATCH --time=2-00:00:00
+#SBATCH --time=4-00:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=h100 # if you want a particular type of GPU
@@ -26,7 +26,7 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs visible on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
                                  
-srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/whisper_tiny_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml \
+srun -K --cpu-bind=cores python3 lightning_scripts/train.py --config_path model_configs/whisper_tiny_barlow_equivariant_lmbda_1e-2_lr_1e-3_eq_lmbda_0e-01_audioset_only_AdamW.yaml \
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --exp_dir model_checkpoints \
                                    --resume_training 
