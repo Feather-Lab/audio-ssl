@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=8
 
 #SBATCH --mem=256Gb
-#SBATCH --time=1:00:00 
+#SBATCH --time=3:00:00 
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb  # if you want a particular type of GPU
@@ -31,8 +31,9 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py  \
-                                   --model_config model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml \
+                                   --model_config model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml \
                                    --num_workers $SLURM_JOB_CPUS_PER_NODE \
+                                   --output_dir parameter_decoding_v2 \
                                    --batch_size 192 \
                                    --num_eval 10 \
                                    --num_train 50 \

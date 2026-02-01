@@ -8,8 +8,9 @@ import logging
 import os
 import pickle
 from argparse import ArgumentParser
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -49,16 +50,6 @@ TIME_SHIFT_RANGE = [-0.250, 0.250]
 FILTER_ORDER_RANGE = [1, 4]  # Discrete: 1, 2, 3, 4
 BANDPASS_FREQ_LOW_RANGE = [4e1, 4e2]
 BANDPASS_FREQ_HIGH_RANGE = [4e3, 10e3]
-
-AUGMENTATION_LIST = [
-    "dB SNR",
-    "Pitch (semitones)",
-    "% Time warp",
-    "Time shift (s)",
-    "Filter order",
-    "Filter low cutoff",
-    "Filter high cutoff",
-]
 
 
 def pearsonr_vec(true: np.ndarray, pred: np.ndarray) -> np.ndarray:
@@ -369,6 +360,43 @@ filter_collate_fn = _create_collate_fn(filter_transform)
 time_shift_collate_fn = _create_collate_fn(time_shift_transform)
 
 
+@dataclass
+class AugmentationConfig:
+    """Configuration for an augmentation type."""
+    name: str
+    collate_fn: Callable
+    param_names: List[str]
+    param_indices: List[int] = field(default_factory=list)
+    
+    def __post_init__(self):
+        if not self.param_indices:
+            self.param_indices = list(range(len(self.param_names)))
+
+
+# Define augmentation configurations
+AUGMENTATION_CONFIGS = [
+    AugmentationConfig(
+        name="snr",
+        collate_fn=snr_collate_fn,
+        param_names=["dB SNR"],
+        param_indices=[0],
+    ),
+    AugmentationConfig(
+        name="filter",
+        collate_fn=filter_collate_fn,
+        param_names=["Pitch (semitones)", "% Time warp", "Filter order", 
+                     "Filter low cutoff", "Filter high cutoff"],
+        param_indices=[0, 1, 2, 3, 4],
+    ),
+    AugmentationConfig(
+        name="time_shift",
+        collate_fn=time_shift_collate_fn,
+        param_names=["Time shift (s)"],
+        param_indices=[0],
+    ),
+]
+
+
 def get_rep_wrapped_model(
     model: torch.nn.Module, input_tensor: torch.Tensor, layer: str
 ) -> torch.Tensor:
@@ -445,49 +473,6 @@ def extract_features_param_decoding(
     return responses_clean, responses_augmented, params, None
 
 
-def create_data_loaders(
-    train_dataset, val_dataset, num_workers: int
-) -> Dict[str, torch.utils.data.DataLoader]:
-    """Create data loaders for all augmentation types.
-
-    Args:
-        train_dataset: Training dataset
-        val_dataset: Validation dataset
-        num_workers: Number of worker processes
-
-    Returns:
-        Dictionary of data loaders
-    """
-    loader_kwargs = {
-        "batch_size": 1,
-        "shuffle": False,
-        "num_workers": num_workers,
-        "pin_memory": True,
-    }
-
-    loaders = {
-        "snr_train": torch.utils.data.DataLoader(
-            train_dataset, collate_fn=snr_collate_fn, **loader_kwargs
-        ),
-        "filter_train": torch.utils.data.DataLoader(
-            train_dataset, collate_fn=filter_collate_fn, **loader_kwargs
-        ),
-        "time_shift_train": torch.utils.data.DataLoader(
-            train_dataset, collate_fn=time_shift_collate_fn, **loader_kwargs
-        ),
-        "snr_test": torch.utils.data.DataLoader(
-            val_dataset, collate_fn=snr_collate_fn, **loader_kwargs
-        ),
-        "filter_test": torch.utils.data.DataLoader(
-            val_dataset, collate_fn=filter_collate_fn, **loader_kwargs
-        ),
-        "time_shift_test": torch.utils.data.DataLoader(
-            val_dataset, collate_fn=time_shift_collate_fn, **loader_kwargs
-        ),
-    }
-    return loaders
-
-
 def load_model(
     config_path: Path,
     checkpoint_path: Optional[str],
@@ -557,45 +542,6 @@ def load_model(
     return model, all_layers
 
 
-def compute_scores(
-    y_true: Dict[str, np.ndarray], y_pred: Dict[str, np.ndarray], score_func
-) -> Dict[str, float]:
-    """Compute scores for each augmentation type.
-
-    Args:
-        y_true: True values dictionary
-        y_pred: Predicted values dictionary
-        score_func: Scoring function (r2_score or pr2_score)
-
-    Returns:
-        Dictionary of scores per augmentation
-    """
-    scores = {}
-    for idx, aug_name in enumerate(AUGMENTATION_LIST):
-        if idx == 0:  # dB SNR
-            true_vals = y_true["snr"][:, 0] if y_true["snr"].ndim > 1 else y_true["snr"]
-            pred_vals = y_pred["snr"][:, 0] if y_pred["snr"].ndim > 1 else y_pred["snr"]
-            scores[aug_name] = score_func(true_vals, pred_vals)
-        elif idx == 3:  # Time shift
-            true_vals = y_true["ts"][:, 0] if y_true["ts"].ndim > 1 else y_true["ts"]
-            pred_vals = y_pred["ts"][:, 0] if y_pred["ts"].ndim > 1 else y_pred["ts"]
-            scores[aug_name] = score_func(true_vals, pred_vals)
-        else:  # Filter params
-            filter_idx = idx - 1 if idx < 3 else idx - 2
-            true_vals = (
-                y_true["filter"][:, filter_idx]
-                if y_true["filter"].ndim > 1
-                else y_true["filter"]
-            )
-            pred_vals = (
-                y_pred["filter"][:, filter_idx]
-                if y_pred["filter"].ndim > 1
-                else y_pred["filter"]
-            )
-            scores[aug_name] = score_func(true_vals, pred_vals)
-    return scores
-
-
 def save_plots(
     r2_scores: Dict[str, float],
     pr2_scores: Dict[str, float],
@@ -652,6 +598,365 @@ def save_plots(
     plt.close()
 
 
+class ParameterDecodingEvaluator:
+    """Evaluator for parameter decoding from model representations.
+    
+    This class encapsulates the feature extraction and regression pipeline
+    for evaluating how well augmentation parameters can be decoded from
+    model representations.
+    """
+    
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        layer: str,
+        ridge_alpha: float = 0.0,
+        num_workers: int = 1,
+    ):
+        """Initialize the evaluator.
+        
+        Args:
+            model: Model to extract representations from
+            layer: Layer name to extract representations from
+            ridge_alpha: Ridge regularization parameter
+            num_workers: Number of data loader workers
+        """
+        self.model = model
+        self.layer = layer
+        self.ridge_alpha = ridge_alpha
+        self.num_workers = num_workers
+        self.loader_kwargs = {
+            "batch_size": 1,
+            "shuffle": False,
+            "num_workers": num_workers,
+            "pin_memory": True,
+        }
+    
+    def extract_features(
+        self,
+        loader: torch.utils.data.DataLoader,
+        num_batches: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Extract features from the model for a given data loader.
+        
+        Args:
+            loader: Data loader with augmented samples
+            num_batches: Number of batches to process
+            
+        Returns:
+            Tuple of (clean_responses, augmented_responses, params)
+        """
+        rc, ra, params, _ = extract_features_param_decoding(
+            self.model, loader, layer=self.layer, num_batches=num_batches
+        )
+        return rc, ra, params
+    
+    def prepare_regression_data(
+        self,
+        rc_train: torch.Tensor,
+        ra_train: torch.Tensor,
+        params_train: torch.Tensor,
+        rc_test: torch.Tensor,
+        ra_test: torch.Tensor,
+        params_test: torch.Tensor,
+        aug_name: str,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare extracted features for regression.
+        
+        Combines clean and augmented responses, filters invalid samples,
+        and normalizes targets.
+        
+        Args:
+            rc_train: Clean responses for training
+            ra_train: Augmented responses for training
+            params_train: Parameters for training
+            rc_test: Clean responses for testing
+            ra_test: Augmented responses for testing
+            params_test: Parameters for testing
+            aug_name: Augmentation name (used for SNR filtering)
+            
+        Returns:
+            Tuple of (X_train, X_test, Y_train, Y_test)
+        """
+        # Combine features: concatenate clean and augmented
+        X_train = torch.cat([rc_train, ra_train], dim=1).detach().cpu().numpy()
+        X_test = torch.cat([rc_test, ra_test], dim=1).detach().cpu().numpy()
+        X_test = X_test.reshape(X_test.shape[0], -1)
+        
+        # Prepare targets
+        Y_train = params_train.detach().cpu().numpy()
+        Y_test = params_test.detach().cpu().numpy()
+        
+        # Ensure 2D shape
+        if Y_train.ndim == 1:
+            Y_train = Y_train.reshape(-1, 1)
+            Y_test = Y_test.reshape(-1, 1)
+        
+        # Filter out invalid SNR examples
+        if aug_name == "snr":
+            train_valid = ~np.isinf(Y_train).any(axis=1)
+            test_valid = ~np.isinf(Y_test).any(axis=1)
+            X_train = X_train[train_valid]
+            X_test = X_test[test_valid]
+            Y_train = Y_train[train_valid]
+            Y_test = Y_test[test_valid]
+        
+        # Normalize parameters using training stats
+        mean, std = Y_train.mean(axis=0), Y_train.std(axis=0)
+        Y_train = (Y_train - mean) / std
+        Y_test = (Y_test - mean) / std
+        
+        return X_train, X_test, Y_train, Y_test
+    
+    def fit_regression(
+        self,
+        X_train: np.ndarray,
+        Y_train: np.ndarray,
+    ) -> Ridge:
+        """Fit ridge regression model.
+        
+        Args:
+            X_train: Training features
+            Y_train: Training targets
+            
+        Returns:
+            Fitted Ridge regression model
+        """
+        return Ridge(alpha=self.ridge_alpha).fit(X_train, Y_train)
+    
+    def evaluate_regression(
+        self,
+        regression: Ridge,
+        X_test: np.ndarray,
+        Y_test: np.ndarray,
+    ) -> Tuple[np.ndarray, float]:
+        """Evaluate regression model on test data.
+        
+        Args:
+            regression: Fitted regression model
+            X_test: Test features
+            Y_test: Test targets
+            
+        Returns:
+            Tuple of (predictions, R^2 score)
+        """
+        preds = regression.predict(X_test)
+        score = regression.score(X_test, Y_test)
+        return preds, score
+    
+    def compute_per_param_scores(
+        self,
+        Y_test: np.ndarray,
+        preds: np.ndarray,
+        param_names: List[str],
+        score_func: Callable,
+    ) -> Dict[str, float]:
+        """Compute scores for each parameter.
+        
+        Args:
+            Y_test: True test values
+            preds: Predicted values
+            param_names: Names of parameters
+            score_func: Scoring function
+            
+        Returns:
+            Dictionary mapping parameter names to scores
+        """
+        scores = {}
+        for idx, param_name in enumerate(param_names):
+            true_vals = Y_test[:, idx] if Y_test.ndim > 1 else Y_test
+            pred_vals = preds[:, idx] if preds.ndim > 1 else preds
+            scores[param_name] = score_func(true_vals, pred_vals)
+        return scores
+    
+    def evaluate_augmentation(
+        self,
+        train_dataset,
+        val_dataset,
+        aug_config: AugmentationConfig,
+        num_train: int,
+        num_eval: int,
+        seed: int = 0,
+    ) -> Dict:
+        """Evaluate parameter decoding for a single augmentation type.
+        
+        Args:
+            train_dataset: Training dataset
+            val_dataset: Validation dataset
+            aug_config: Augmentation configuration
+            num_train: Number of training batches
+            num_eval: Number of evaluation batches
+            seed: Random seed
+            
+        Returns:
+            Dictionary with evaluation results
+        """
+        seed_everything(seed)
+        
+        # Create loaders
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, collate_fn=aug_config.collate_fn, **self.loader_kwargs
+        )
+        test_loader = torch.utils.data.DataLoader(
+            val_dataset, collate_fn=aug_config.collate_fn, **self.loader_kwargs
+        )
+        
+        # Extract features
+        rc_train, ra_train, params_train = self.extract_features(train_loader, num_train)
+        rc_test, ra_test, params_test = self.extract_features(test_loader, num_eval)
+        
+        # Prepare data
+        X_train, X_test, Y_train, Y_test = self.prepare_regression_data(
+            rc_train, ra_train, params_train,
+            rc_test, ra_test, params_test,
+            aug_config.name,
+        )
+        
+        # Fit and evaluate regression
+        regression = self.fit_regression(X_train, Y_train)
+        preds, overall_score = self.evaluate_regression(regression, X_test, Y_test)
+        
+        # Compute per-parameter scores
+        r2_scores = self.compute_per_param_scores(
+            Y_test=Y_test,
+            preds=preds,
+            param_names=aug_config.param_names,
+            score_func=r2_score
+        )
+        pr2_scores = self.compute_per_param_scores(
+            Y_test=Y_test,
+            preds=preds,
+            param_names=aug_config.param_names,
+            score_func=pr2_score
+        )
+        
+        return {
+            "overall_score": overall_score,
+            "r2_scores": r2_scores,
+            "pr2_scores": pr2_scores,
+        }
+    
+    def run_evaluation(
+        self,
+        train_dataset,
+        val_dataset,
+        num_train: int,
+        num_eval: int,
+        n_runs: int = 5,
+        verbose: bool = True,
+    ) -> Dict:
+        """Run full evaluation across all augmentations and multiple runs.
+        
+        Args:
+            train_dataset: Training dataset
+            val_dataset: Validation dataset
+            num_train: Number of training batches
+            num_eval: Number of evaluation batches
+            n_runs: Number of runs per augmentation
+            verbose: Whether to print progress
+            
+        Returns:
+            Dictionary with all results and summary statistics
+        """
+        all_run_results = {
+            "r2_scores": [],
+            "pr2_scores": [],
+            "per_aug_r2": {},
+        }
+        
+        for run_idx in range(n_runs):
+            if verbose:
+                print(f"\n=== Run {run_idx + 1}/{n_runs} ===")
+            
+            run_r2_scores = {}
+            run_pr2_scores = {}
+            
+            for aug_config in AUGMENTATION_CONFIGS:
+                if verbose:
+                    print(f"\nProcessing augmentation: {aug_config.name}")
+                
+                result = self.evaluate_augmentation(
+                    train_dataset=train_dataset,
+                    val_dataset=val_dataset,
+                    aug_config=aug_config,
+                    num_train=num_train,
+                    num_eval=num_eval,
+                    seed=run_idx,
+                )
+                
+                if verbose:
+                    print(f"  Overall R^2: {result['overall_score']:.3f}")
+                    for param_name, score in result["r2_scores"].items():
+                        print(f"  {param_name}: R^2={score:.3f}")
+                
+                # Store results
+                if aug_config.name not in all_run_results["per_aug_r2"]:
+                    all_run_results["per_aug_r2"][aug_config.name] = []
+                all_run_results["per_aug_r2"][aug_config.name].append(result["overall_score"])
+                
+                run_r2_scores.update(result["r2_scores"])
+                run_pr2_scores.update(result["pr2_scores"])
+            
+            all_run_results["r2_scores"].append(run_r2_scores)
+            all_run_results["pr2_scores"].append(run_pr2_scores)
+        
+        # Compute summary statistics
+        summary = self._compute_summary_statistics(all_run_results, verbose)
+        
+        return {
+            "r2_scores": summary["r2_summary"],
+            "pr2_scores": summary["pr2_summary"],
+            "per_aug_r2": all_run_results["per_aug_r2"],
+            "n_runs": n_runs,
+            "all_runs": all_run_results,
+        }
+    
+    def _compute_summary_statistics(
+        self,
+        all_run_results: Dict,
+        verbose: bool = True,
+    ) -> Dict:
+        """Compute summary statistics across runs.
+        
+        Args:
+            all_run_results: Results from all runs
+            verbose: Whether to print summary
+            
+        Returns:
+            Dictionary with r2 and pr2 summaries
+        """
+        if verbose:
+            print("\n=== Summary Statistics ===")
+        
+        all_param_names = []
+        for aug_config in AUGMENTATION_CONFIGS:
+            all_param_names.extend(aug_config.param_names)
+        
+        r2_summary = {}
+        pr2_summary = {}
+        
+        for param_name in all_param_names:
+            r2_values = [run[param_name] for run in all_run_results["r2_scores"]]
+            pr2_values = [run[param_name] for run in all_run_results["pr2_scores"]]
+            
+            r2_summary[param_name] = {
+                "mean": np.mean(r2_values),
+                "std": np.std(r2_values),
+                "values": r2_values,
+            }
+            pr2_summary[param_name] = {
+                "mean": np.mean(pr2_values),
+                "std": np.std(pr2_values),
+                "values": pr2_values,
+            }
+            
+            if verbose:
+                print(f"{param_name}: R^2 = {r2_summary[param_name]['mean']:.3f} "
+                      f"± {r2_summary[param_name]['std']:.3f}")
+        
+        return {"r2_summary": r2_summary, "pr2_summary": pr2_summary}
+
+
 def main(args):
     """Main function to run parameter decoding evaluation."""
     # Create datasets
@@ -665,9 +970,6 @@ def main(args):
         batch_size=args.batch_size,
         eval_max=5,
     )
-
-    # Create data loaders
-    loaders = create_data_loaders(train_dataset, val_dataset, args.num_workers)
 
     # Load model
     config_path = Path(args.model_config)
@@ -684,152 +986,45 @@ def main(args):
 
     layer = all_layers[args.job_id] if args.job_id > -1 else args.layer
     print(f"Layer: {layer}")
+    print(f"Running {args.n_runs} regression runs per augmentation")
 
-    # Extract features for each augmentation type
-    seed_everything(0)
-    (
-        rc_train_snr,
-        ra_train_snr,
-        params_train_snr,
-        _,
-    ) = extract_features_param_decoding(
-        model, loaders["snr_train"], layer=layer, num_batches=args.num_train
-    )
-    (
-        rc_test_snr,
-        ra_test_snr,
-        params_test_snr,
-        _,
-    ) = extract_features_param_decoding(
-        model, loaders["snr_test"], layer=layer, num_batches=args.num_eval
-    )
-
-    seed_everything(0)
-    (
-        rc_train_filter,
-        ra_train_filter,
-        params_train_filter,
-        _,
-    ) = extract_features_param_decoding(
-        model, loaders["filter_train"], layer=layer, num_batches=args.num_train
-    )
-    (
-        rc_test_filter,
-        ra_test_filter,
-        params_test_filter,
-        _,
-    ) = extract_features_param_decoding(
-        model, loaders["filter_test"], layer=layer, num_batches=args.num_eval
-    )
-
-    seed_everything(0)
-    (
-        rc_train_ts,
-        ra_train_ts,
-        params_train_ts,
-        _,
-    ) = extract_features_param_decoding(
-        model,
-        loaders["time_shift_train"],
+    # Create evaluator and run evaluation
+    evaluator = ParameterDecodingEvaluator(
+        model=model,
         layer=layer,
-        num_batches=args.num_train,
+        ridge_alpha=args.ridge_alpha,
+        num_workers=args.num_workers,
     )
-    (
-        rc_test_ts,
-        ra_test_ts,
-        params_test_ts,
-        _,
-    ) = extract_features_param_decoding(
-        model, loaders["time_shift_test"], layer=layer, num_batches=args.num_eval
-    )
-
-    # Combine features: concatenate clean and augmented
-    X_train_snr = torch.cat([rc_train_snr, ra_train_snr], dim=1).detach().cpu().numpy()
-    X_test_snr = torch.cat([rc_test_snr, ra_test_snr], dim=1).detach().cpu().numpy()
-    X_train_filter = torch.cat([rc_train_filter, ra_train_filter], dim=1).detach().cpu().numpy()
-    X_test_filter = torch.cat([rc_test_filter, ra_test_filter], dim=1).detach().cpu().numpy()
-    X_train_ts = torch.cat([rc_train_ts, ra_train_ts], dim=1).detach().cpu().numpy()
-    X_test_ts = torch.cat([rc_test_ts, ra_test_ts], dim=1).detach().cpu().numpy()
-
-    X_test_snr = X_test_snr.reshape(X_test_snr.shape[0], -1)
-    X_test_filter = X_test_filter.reshape(X_test_filter.shape[0], -1)
-    X_test_ts = X_test_ts.reshape(X_test_ts.shape[0], -1)
-
-    # Prepare targets
-    Y_train_snr = params_train_snr[:, 0].detach().cpu().numpy()
-    Y_test_snr = params_test_snr[:, 0].detach().cpu().numpy()
-    Y_train_filter = params_train_filter.detach().cpu().numpy()
-    Y_test_filter = params_test_filter.detach().cpu().numpy()
-    Y_train_ts = params_train_ts[:, 0].detach().cpu().numpy()
-    Y_test_ts = params_test_ts[:, 0].detach().cpu().numpy()
-
-    # Filter out invalid SNR examples
-    train_ixs_snr = np.argwhere(~np.isinf(Y_train_snr)).flatten()
-    test_ixs_snr = np.argwhere(~np.isinf(Y_test_snr)).flatten()
-
-    X_train_snr = X_train_snr[train_ixs_snr]
-    X_test_snr = X_test_snr[test_ixs_snr]
-    Y_train_snr = Y_train_snr[train_ixs_snr].reshape(-1, 1)
-    Y_test_snr = Y_test_snr[test_ixs_snr].reshape(-1, 1)
-
-    # Normalize parameters using empirical stats
-    snr_mean, snr_std = Y_train_snr.mean(0), Y_train_snr.std(0)
-    Y_train_snr = (Y_train_snr - snr_mean) / snr_std
-    Y_test_snr = (Y_test_snr - snr_mean) / snr_std
-
-    filter_mean, filter_std = Y_train_filter.mean(0), Y_train_filter.std(0)
-    Y_train_filter = (Y_train_filter - filter_mean) / filter_std
-    Y_test_filter = (Y_test_filter - filter_mean) / filter_std
-
-    ts_mean, ts_std = Y_train_ts.mean(0), Y_train_ts.std(0)
-    Y_train_ts = (Y_train_ts - ts_mean) / ts_std
-    Y_test_ts = (Y_test_ts - ts_mean) / ts_std
     
-    # Reshape to 2D for consistency with predictions
-    Y_train_ts = Y_train_ts.reshape(-1, 1)
-    Y_test_ts = Y_test_ts.reshape(-1, 1)
-
-    # Fit regressions
-    regression_snr = Ridge(alpha=args.ridge_alpha).fit(X_train_snr, Y_train_snr)
-    regression_filter = Ridge(alpha=args.ridge_alpha).fit(X_train_filter, Y_train_filter)
-    regression_ts = Ridge(alpha=args.ridge_alpha).fit(X_train_ts, Y_train_ts)
-
-    score_snr = regression_snr.score(X_test_snr, Y_test_snr)
-    score_filter = regression_filter.score(X_test_filter, Y_test_filter)
-    score_ts = regression_ts.score(X_test_ts, Y_test_ts)
-
-    preds_snr = regression_snr.predict(X_test_snr).reshape(-1, 1)
-    preds_filter = regression_filter.predict(X_test_filter)
-    preds_ts = regression_ts.predict(X_test_ts).reshape(-1, 1)
-
-    print(f"Model Scores:")
-    print(f"{score_snr:.3f} (R^2 dB SNR)")
-    print(f"{score_filter:.3f} (R^2 filter)")
-    print(f"{score_ts:.3f} (R^2 time shift)")
-
-    # Compute scores per augmentation
-    y_true = {"snr": Y_test_snr, "filter": Y_test_filter, "ts": Y_test_ts}
-    y_pred = {"snr": preds_snr, "filter": preds_filter, "ts": preds_ts}
-
-    r2_scores = compute_scores(y_true, y_pred, r2_score)
-    r2_pr2_scores = compute_scores(y_true, y_pred, pr2_score)
+    results = evaluator.run_evaluation(
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
+        num_train=args.num_train,
+        num_eval=args.num_eval,
+        n_runs=args.n_runs,
+        verbose=True,
+    )
 
     # Save plots and results
-    output_dir = Path("parameter_decoding") / model_name
+    output_dir = Path(args.output_dir) / model_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
     if args.save_plots:
-        save_plots(r2_scores, r2_pr2_scores, model_name, layer, args.ridge_alpha, output_dir)
+        mean_r2 = {k: v["mean"] for k, v in results["r2_scores"].items()}
+        mean_pr2 = {k: v["mean"] for k, v in results["pr2_scores"].items()}
+        save_plots(mean_r2, mean_pr2, model_name, layer, args.ridge_alpha, output_dir)
 
     data_out_name = (
         output_dir
         / f"{layer}_r2_decoding_values"
-        f"{f'_ridge_alpha_{args.ridge_alpha:.0e}' if args.ridge_alpha != 0.0 else ''}.pkl"
+        f"{f'_ridge_alpha_{args.ridge_alpha:.0e}' if args.ridge_alpha != 0.0 else ''}"
+        f"_n_runs_{args.n_runs}.pkl"
     )
-    data = {"r2_scores": r2_scores, "pr2_scores": r2_pr2_scores}
 
     with open(data_out_name, "wb") as handle:
-        pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(results, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
+    print(f"\nResults saved to: {data_out_name}")
 
 
 if __name__ == "__main__":
@@ -902,9 +1097,21 @@ if __name__ == "__main__":
         help="Alpha to use in ridge regression. Default (0) is same as OLS",
     )
     parser.add_argument(
+        "--n_runs",
+        default=5,
+        type=int,
+        help="Number of regression runs per augmentation (default: 5)",
+    )
+    parser.add_argument(
         "--save_plots",
         action="store_true",
         help="Generate and save plots (disabled by default)",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default=Path("parameter_decoding"),
+        type=Path,
+        help="Directory to save plots and results to",
     )
     args = parser.parse_args()
     main(args)
