@@ -375,6 +375,8 @@ def format_model_str(path):
     # For resnet models with invariant_only, set lambda to 0.0 if no eq_lmbda found
     elif 'invariant_only' in path_str and arch.startswith('resnet'):
         eq_lambda = '0.0'
+    
+    
 
     task_parts = []
     if is_ssl:
@@ -450,6 +452,8 @@ def format_model_str_word_task(path):
             eq_lambda = str(float(lambda_match.group(1)))
     # For resnet models with invariant_only, set lambda to 0.0 if no eq_lmbda found
     elif 'invariant_only' in full_path_str and arch.startswith('resnet'):
+        eq_lambda = '0.0'
+    elif 'invariant' in full_path_str and 'kell2018' in arch:
         eq_lambda = '0.0'
 
     task_parts = []
