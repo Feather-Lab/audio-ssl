@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -53,6 +55,23 @@ def get_standard_hue_order():
 def get_standard_base_colors():
     """Get the standard base colors for supervised models, normalized."""
     return normalize_palette_dict(STANDARD_BASE_COLORS)
+
+
+def filter_models_for_plot(df, hue_order=None):
+    """
+    Filter a results dataframe to only include models in the standard plot order.
+    Used so bar plots show only the models we define in STANDARD_HUE_ORDER.
+
+    Args:
+        df: DataFrame with a 'model_name' column (e.g. concatenated ESC-50, speech, word, nsynth).
+        hue_order: List of model names to keep. If None, uses get_standard_hue_order().
+
+    Returns:
+        DataFrame subset of df where model_name is in hue_order.
+    """
+    if hue_order is None:
+        hue_order = get_standard_hue_order()
+    return df[df['model_name'].isin(hue_order)].copy()
 
 
 def get_model_groups(hue_order=None):
@@ -128,8 +147,12 @@ def model_label(name):
     For SSL models, shows just lambda value. Otherwise strips CochDNN9 prefix.
     """
     if name.startswith('CochDNN9 ssl ') or name.startswith('CochDNN9 scaled ssl '):
-        return lambda_label(name)
-    return strip_cochdnn9(name)
+        label = lambda_label(name)
+    else:
+        label = strip_cochdnn9(name)
+    # Display label for supervised audioset
+    label = label.replace('supervised audioset', 'supervised aud. events')
+    return label
 
 
 def normalize_model_name(model_name):
@@ -707,3 +730,226 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, xlabel='Model Group', 
     ax.set_title(title)
     
     return legend_handles, legend_labels
+
+
+def plot_fmri_components(results_df, exclude_pattern="spectemp|dual|1.0", 
+                         n_cols=6, figsize=None, show_spectemp_line=True,
+                         ylim_offset=0.05, average_over_components=False,
+                         model_order=None):
+    """
+    Plot bar charts for fMRI component predictions across models.
+    
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        DataFrame with columns: 'model_name_str', 'comp', 'median_r2_test', 
+        'median_r2_test_std_over_it'
+    exclude_pattern : str, optional
+        Regex pattern for model names to exclude from bars (default: "spectemp|dual|1.0")
+    n_cols : int, optional
+        Number of columns in subplot grid (default: 6)
+    figsize : tuple, optional
+        Figure size as (width, height). If None, auto-calculated based on grid.
+    show_spectemp_line : bool, optional
+        Whether to show spectrotemporal reference line (default: True)
+    ylim_offset : float, optional
+        Offset below spectemp line for y-axis lower limit (default: 0.05)
+    average_over_components : bool, optional
+        If True, plot a single panel showing average across all components (default: False)
+    model_order : list, optional
+        Custom list of model names to plot and their order. If None, uses standard order
+        plus any additional models found in the data.
+    
+    Returns
+    -------
+    fig, axes : matplotlib figure and axes (axes is a single Axes if average_over_components=True)
+    """
+    # Filter data for plotting
+    to_plot = results_df[~results_df.model_name_str.str.contains(exclude_pattern)]
+    
+    # Build model order - use custom if provided, otherwise standard + any extra models in data
+    all_models_in_data = to_plot['model_name_str'].unique()
+    if model_order is not None:
+        # Use custom order, filter to models actually in data
+        model_order = [m for m in model_order if m in all_models_in_data]
+    else:
+        # Start with standard order, filter to models in data
+        std_order = get_standard_hue_order()
+        model_order = [m for m in std_order if m in all_models_in_data]
+        # Add any models in data that aren't in standard order
+        extra_models = [m for m in all_models_in_data if m not in model_order]
+        model_order = model_order + extra_models
+    
+    # Build palette
+    base_colors = get_standard_base_colors()
+    hue_dict = build_model_palette(model_order, base_colors)
+    hue_dict['byol-a'] = "k"
+    # Add palette for whisper models from Oranges palette
+    whisper_models = [m for m in model_order if m.lower().startswith("whisper")]
+    if whisper_models:
+        whisper_colors = sns.color_palette('Oranges', n_colors=max(len(whisper_models), 2))
+        for i, name in enumerate(whisper_models):
+            hue_dict[name] = whisper_colors[i % len(whisper_colors)]
+    # Get spectrotemporal values for reference line
+    spectemp_vals = results_df[results_df.model_name_str.str.contains("spectemp")]
+    
+    # Helper function to create x-axis labels
+    def get_x_labels(hue_order):
+        x_labels = []
+        for name in hue_order:
+            label = model_label(name)
+            if 'scaled ssl' in name:
+                if label.startswith('λ='):
+                    lambda_val = label.replace('λ=', '')
+                    x_labels.append(f"scaled ssl λ={lambda_val}")
+                else:
+                    x_labels.append(f"scaled ssl {label}")
+            elif 'ssl' in name and 'scaled' not in name:
+                if label.startswith('λ='):
+                    lambda_val = label.replace('λ=', '')
+                    x_labels.append(f"ssl λ={lambda_val}")
+                else:
+                    x_labels.append(f"ssl {label}")
+            else:
+                x_labels.append(label)
+        return x_labels
+    
+    # Average over components mode - single panel
+    if average_over_components:
+        if figsize is None:
+            figsize = (4, 4)
+        
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        
+        # Calculate average across components for each model
+        avg_data = to_plot.groupby('model_name_str').agg({
+            'median_r2_test': 'mean',
+            'median_r2_test_std_over_it': 'mean'
+        }).reset_index()
+        
+        # Remove duplicates
+        avg_data = avg_data.drop_duplicates(subset=['model_name_str'], keep='first')
+        
+        # Reorder by model order
+        avg_data = avg_data.set_index('model_name_str').loc[model_order].reset_index()
+        
+        # Get the sorted order
+        avg_hue_order = avg_data['model_name_str'].values
+        
+        # Create x positions
+        x_pos = np.arange(len(avg_hue_order))
+        
+        # Get colors for each model
+        colors = [hue_dict.get(name, '#444444') for name in avg_hue_order]
+        
+        # Create barplot
+        bar_width = 0.8
+        ax.bar(x_pos, avg_data['median_r2_test'].values, width=bar_width, 
+               color=colors, edgecolor='black', linewidth=0.5, zorder=0)
+        
+        # Add error bars
+        errors = avg_data['median_r2_test_std_over_it'].values
+        ax.errorbar(x_pos, avg_data['median_r2_test'].values, yerr=errors, 
+                    fmt='none', color='black', capsize=0, capthick=1, elinewidth=1, zorder=4)
+        
+        # Add spectrotemporal reference line (average across components)
+        if show_spectemp_line and len(spectemp_vals) > 0:
+            spectemp_avg = spectemp_vals.groupby('comp')['median_r2_test'].first().mean()
+            ax.axhline(spectemp_avg, color='k', linestyle='--', linewidth=1.5, zorder=5, label='spectemp')
+            ax.set_ylim(spectemp_avg - ylim_offset, 1)
+        
+        # Set labels and title
+        ax.set_title('Average over components')
+        ax.set_ylabel('mean over median $R^2$')
+        ax.set_xlabel('')
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels(get_x_labels(avg_hue_order), rotation=45, ha='right')
+        ax.grid(axis='y', alpha=0.3, linestyle='--', zorder=0)
+        
+        # Add legend
+        handles, labels = ax.get_legend_handles_labels()
+        if any('spectemp' in label for label in labels):
+            ax.legend(loc='upper right', frameon=False)
+        
+        plt.tight_layout()
+        return fig, ax
+    
+    # Per-component mode - multiple subplots
+    # Get unique components
+    components = to_plot['comp'].unique()
+    
+    # Create figure with subplots for each component
+    n_components = len(components)
+    n_rows = (n_components + n_cols - 1) // n_cols
+    
+    if figsize is None:
+        figsize = (20, 3 * n_rows)
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    if n_components == 1:
+        axes = [axes]
+    else:
+        axes = axes.flatten()
+    
+    for idx, component in enumerate(components):
+        ax = axes[idx]
+        
+        # Filter data for this component
+        comp_data = to_plot[to_plot['comp'] == component].copy()
+        
+        # Remove duplicates - keep first occurrence of each model_name_str
+        comp_data = comp_data.drop_duplicates(subset=['model_name_str'], keep='first')
+        
+        # Use model order for this component
+        comp_data = comp_data.set_index('model_name_str').loc[model_order].reset_index()
+        
+        # Get the sorted order for this component
+        comp_hue_order = comp_data['model_name_str'].values
+        
+        # Create x positions
+        x_pos = np.arange(len(comp_hue_order))
+        
+        # Get colors for each model
+        colors = [hue_dict.get(name, '#444444') for name in comp_hue_order]
+        
+        # Create barplot with styling matching plot_grouped_bars
+        bar_width = 0.8
+        ax.bar(x_pos, comp_data['median_r2_test'].values, width=bar_width, 
+               color=colors, edgecolor='black', linewidth=0.5, zorder=0)
+        
+        # Add error bars (vertical lines) using median_r2_test_std_over_it
+        errors = comp_data['median_r2_test_std_over_it'].values
+        ax.errorbar(x_pos, comp_data['median_r2_test'].values, yerr=errors, 
+                    fmt='none', color='black', capsize=0, capthick=1, elinewidth=1, zorder=4)
+        
+        # Add spectrotemporal reference line
+        if show_spectemp_line and len(spectemp_vals) > 0:
+            spectemp_row = spectemp_vals[spectemp_vals.comp == component]
+            if len(spectemp_row) > 0:
+                spectemp_med = spectemp_row['median_r2_test'].values[0]
+                ax.axhline(spectemp_med, color='k', linestyle='--', linewidth=1.5, zorder=5, label='spectemp')
+                ax.set_ylim(spectemp_med - ylim_offset, 1)
+        
+        # Set labels and title
+        ax.set_title(f'{component}')
+        if idx == 0 or idx == n_cols:
+            ax.set_ylabel('median $R^2$')
+        ax.set_xlabel('')
+        ax.set_xticks(x_pos)
+        
+        # Create x-axis labels using helper function
+        ax.set_xticklabels(get_x_labels(comp_hue_order), rotation=45, ha='right')
+        
+        ax.grid(axis='y', alpha=0.3, linestyle='--', zorder=0)
+    
+    # Hide extra subplots if any
+    for idx in range(n_components, len(axes)):
+        axes[idx].set_visible(False)
+    
+    # Add legend for spectemp dashed line
+    handles, labels = axes[0].get_legend_handles_labels()
+    if any('spectemp' in label or 'Spectrotemporal' in label for label in labels):
+        axes[0].legend(loc='upper right', frameon=False)
+    
+    plt.tight_layout()
+    return fig, axes
