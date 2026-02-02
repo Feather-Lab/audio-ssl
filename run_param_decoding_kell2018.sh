@@ -31,7 +31,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py  \
-                                   --model_config model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml \
+                                   --model_config model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
                                    --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --output_dir parameter_decoding_v2 \
                                    --batch_size 192 \

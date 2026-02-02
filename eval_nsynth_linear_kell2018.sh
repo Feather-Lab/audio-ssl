@@ -10,6 +10,7 @@
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb
+#SBATCH --array=0-11 # 0-11 in manifest
 
 module load cuda cudnn nccl
 
@@ -23,21 +24,24 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 # Example: NSynth instrument family classification with kell2018
     # --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
+    # --config_path msodel_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
+    # --supervised_backbone \
 srun python3 lightning_scripts/eval_nsynth_linear.py \
-    --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
-    --supervised_backbone \
+    --config_list_path train_config_manifests/cochdnn9_sup_and_ssl_eval_configs.pkl \
+    --array_ix $SLURM_ARRAY_TASK_ID \
     --gpus $num_gpus \
     --num_workers $SLURM_JOB_CPUS_PER_NODE \
     --model_ckpt_dir model_checkpoints \
     --batch_size 256 \
     --layer_str 'relu4' \
     --optimizer "AdamW" \
-    --lr 0.005 \
+    --lr 0.01 \
     --task 'family' \
     --train_epochs 10 \
     --duration 2.0 \
     --no-time_avg_rep \
     --no-lr_scheduler \
     --no-eval_only \
-    --no-use_classifier_ckpt 
+    --no-use_classifier_ckpt  \
+    --with_dropout 
 

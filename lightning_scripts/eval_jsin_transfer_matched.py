@@ -305,6 +305,13 @@ def cli_main(args):
     ######################################
     # Run Eval
     ######################################
+    def bootstrap_mean_and_sem(scores, n_bootstraps=1000):
+        mean = np.mean(scores)
+        boots = [np.mean(np.random.choice(scores, size=len(scores))) for _ in range(n_bootstraps)]
+        # sem is std of the bootstraps
+        sem = np.std(boots) 
+        return mean, sem
+    
     def eval_collate_fn(batch):
         audio, targets = batch[0] # unbox wrapper added by dataloader 
         audio = audio.unsqueeze(1)
@@ -353,31 +360,41 @@ def cli_main(args):
             top5_speaker.append(record['top5']['signal/speaker_int'])
     n_examples = len(outputs)
     
-    if args.task == 'both':
-        output_dict = {
-            "word_top1_mean": torch.stack(top1_word).mean(),
-            "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
-            "speaker_top1_mean": torch.stack(top1_speaker).mean(),
-            "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
+    # get word top1 and top5 mean and sem
+    if args.task == 'both' or args.task == 'word':
+        word_top1_mean, word_top1_sem = bootstrap_mean_and_sem(top1_word, n_bootstraps=1000)
+        word_top5_mean, word_top5_sem = bootstrap_mean_and_sem(top5_word, n_bootstraps=1000)
+    # get speaker top1 and top5 mean and sem
+    if args.task == 'both' or args.task == 'speaker':
+        speaker_top1_mean, speaker_top1_sem = bootstrap_mean_and_sem(top1_speaker, n_bootstraps=1000)
+        speaker_top5_mean, speaker_top5_sem = bootstrap_mean_and_sem(top5_speaker, n_bootstraps=1000)
 
-            "word_top5_mean": torch.stack(top5_word).mean(),
-            "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
-            "speaker_top5_mean": torch.stack(top5_speaker).mean(),
-            "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
+    if args.task == 'both':
+
+        output_dict = {
+            "word_top1_mean": word_top1_mean,
+            "word_top1_sem": word_top1_sem,
+            "speaker_top1_mean": speaker_top1_mean,
+            "speaker_top1_sem": speaker_top1_sem,
+
+            "word_top5_mean": word_top5_mean,
+            "word_top5_sem": word_top5_sem,
+            "speaker_top5_mean": speaker_top5_mean,
+            "speaker_top5_sem": speaker_top5_sem,
         }
     elif args.task == 'word':
         output_dict = {
-            "word_top1_mean": torch.stack(top1_word).mean(),
-            "word_top1_sem": torch.stack(top1_word).std() / np.sqrt(n_examples),
-            "word_top5_mean": torch.stack(top5_word).mean(),
-            "word_top5_sem": torch.stack(top5_word).std() / np.sqrt(n_examples),
+            "word_top1_mean": word_top1_mean,
+            "word_top1_sem": word_top1_sem,
+            "word_top5_mean": word_top5_mean,
+            "word_top5_sem": word_top5_sem,
         }
     elif args.task == 'speaker':
         output_dict = {
-            "speaker_top1_mean": torch.stack(top1_speaker).mean(),
-            "speaker_top1_sem": torch.stack(top1_speaker).std() / np.sqrt(n_examples),
-            "speaker_top5_mean": torch.stack(top5_speaker).mean(),
-            "speaker_top5_sem": torch.stack(top5_speaker).std() / np.sqrt(n_examples),
+            "speaker_top1_mean": speaker_top1_mean,
+            "speaker_top1_sem": speaker_top1_sem,
+            "speaker_top5_mean": speaker_top5_mean,
+            "speaker_top5_sem": speaker_top5_sem,
         }
         
     output_dict = {key:val.item() for key,val in output_dict.items()}  

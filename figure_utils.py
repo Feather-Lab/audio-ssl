@@ -141,7 +141,7 @@ def lambda_label(name):
     return f"λ={match.group(1)}" if match else strip_cochdnn9(name)
 
 
-def model_label(name):
+def model_label(name, with_ssl=False):
     """
     Format model name for plot labels.
     For SSL models, shows just lambda value. Otherwise strips CochDNN9 prefix.
@@ -150,6 +150,12 @@ def model_label(name):
         label = lambda_label(name)
     else:
         label = strip_cochdnn9(name)
+    if with_ssl:
+        if 'scaled ssl' in name:
+            label = f'scaled ssl {label}'
+        elif 'ssl' in name:
+            label = f'ssl {label}'
+
     # Display label for supervised audioset
     label = label.replace('supervised audioset', 'supervised aud. events')
     return label

@@ -31,9 +31,16 @@ def cli_main(args):
     # Load config
     if args.config_path != "":
         config_path = pathlib.Path(args.config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
         config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+    elif args.config_list_path != "":
+        with open(args.config_list_path, 'rb') as f:
+            config_dict = pickle.load(f)
+            config_path = pathlib.Path(config_dict[args.array_ix])
+            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     else:
-        raise ValueError("Must provide config_path")
+        raise ValueError("Must provide either config_path or config_list_path")
 
     use_whisper = args.encoder_type == 'whisper'
     if not use_whisper and 'whisper' in str(config_path).lower():
@@ -43,6 +50,14 @@ def cli_main(args):
     
     # Check if this is BYOL-A (pre-trained, no checkpoint needed)
     use_byola = args.encoder_type == 'byola' or 'byol-a' in str(config_path).lower() or 'byola' in str(config_path).lower()
+    
+    # Infer supervised backbone from config path if not explicitly set
+    supervised_backbone = args.supervised_backbone
+    if supervised_backbone is None and 'supervised_models' in str(config_path):
+        supervised_backbone = True
+        print(f"Inferred supervised_backbone=True from config path")
+    elif supervised_backbone is None:
+        supervised_backbone = False
     
     # Handle BYOL-A config setup (same as speech_commands) - must happen before accessing config values
     if use_byola:
@@ -80,7 +95,7 @@ def cli_main(args):
         config['model']['arch_kwargs']['encoder_layer'] = encoder_layer
     else:
         # Handle supervised models (use arch_params) vs SSL models (use arch_kwargs)
-        if args.supervised_backbone:
+        if supervised_backbone:
             # Supervised models use arch_params for checkpoint loading, but SSLClassifier needs arch_kwargs
             # Keep both: arch_params for model loading, arch_kwargs for SSLClassifier internal logic
             if 'arch_params' in config['model']:
@@ -205,7 +220,7 @@ def cli_main(args):
         ckpt_path=ckpt_path,
         layer_out=args.layer_str,
         num_classes=num_classes,
-        supervised_backbone=args.supervised_backbone,
+        supervised_backbone=supervised_backbone,
         w_mlp=args.w_mlp,
         mlp_dim=args.mlp_dim,
         with_dropout=args.with_dropout,
@@ -302,21 +317,31 @@ def cli_main(args):
     print("Running test inference")
     outputs = trainer.predict(module, test_dataloader, return_predictions=True)
     
+    # Bootstrap function for computing SEM (same as eval_jsin_transfer_matched.py)
+    def bootstrap_mean_and_sem(scores, n_bootstraps=1000):
+        mean = np.mean(scores)
+        boots = [np.mean(np.random.choice(scores, size=len(scores))) for _ in range(n_bootstraps)]
+        # sem is std of the bootstraps
+        sem = np.std(boots)
+        return mean, sem
+    
     # Aggregate results
     top1_scores = []
     top5_scores = []
     
     for record in outputs:
-        top1_scores.append(record['top1'])
-        top5_scores.append(record['top5'])
+        top1_scores.append(record['top1'].item())
+        top5_scores.append(record['top5'].item())
     
-    n_examples = len(outputs)
+    # Compute mean and SEM via bootstrapping
+    top1_mean, top1_sem = bootstrap_mean_and_sem(top1_scores, n_bootstraps=1000)
+    top5_mean, top5_sem = bootstrap_mean_and_sem(top5_scores, n_bootstraps=1000)
     
     output_dict = {
-        "top1_mean": torch.stack(top1_scores).mean().item(),
-        "top1_sem": torch.stack(top1_scores).std().item() / np.sqrt(n_examples),
-        "top5_mean": torch.stack(top5_scores).mean().item(),
-        "top5_sem": torch.stack(top5_scores).std().item() / np.sqrt(n_examples),
+        "top1_mean": top1_mean,
+        "top1_sem": top1_sem,
+        "top5_mean": top5_mean,
+        "top5_sem": top5_sem,
         "num_classes": num_classes,
         "task": args.task,
         "layer": args.layer_str,
@@ -344,6 +369,18 @@ if __name__ == "__main__":
         default='',
         type=str,
         help='Path to experiment config YAML file.'
+    )
+    parser.add_argument(
+        '--config_list_path',
+        default='',
+        type=str,
+        help='Path to pickle file containing dict mapping array indices to config paths.'
+    )
+    parser.add_argument(
+        '--array_ix',
+        default=0,
+        type=int,
+        help='Slurm job array index (used with config_list_path).'
     )
     parser.add_argument(
         "--results_dir",

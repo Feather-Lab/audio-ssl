@@ -23,7 +23,7 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 python3 fmri_analysis/measure_layer_activations_165_natural_sounds_lightning.py \
-    --config_path model_configs/whisper_pretrained_large-v3_natsounds.yaml \
+    --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
 
 
     # model_configs/whisper_pretrained_large-v3-turbo_natsounds.yaml \

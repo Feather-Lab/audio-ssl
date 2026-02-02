@@ -26,9 +26,9 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py --config_path byol-
                                    --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
                                    --model_ckpt_dir model_checkpoints \
                                    --batch_size 4096 \
-                                   --layer_str 'features.10' \
+                                   --layer_str 'final' \
                                    --optimizer "AdamW" --lr 0.0005 \
                                    --task 'both' \
                                    --train_epochs 3 \
-                                   --no-with_noise --no-eval_only --lr_scheduler --no-use_classifier_ckpt --no-time_avg_rep --with_dropout 
+                                   --no-with_noise --eval_only --lr_scheduler --use_classifier_ckpt --no-time_avg_rep --with_dropout 
 
