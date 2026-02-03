@@ -141,19 +141,56 @@ def lambda_label(name):
     return f"λ={match.group(1)}" if match else strip_cochdnn9(name)
 
 
-def model_label(name, with_ssl=False):
+def model_label(name, with_ssl=False, use_ssl_names=False):
     """
     Format model name for plot labels.
-    For SSL models, shows just lambda value. Otherwise strips CochDNN9 prefix.
+    
+    Parameters
+    ----------
+    name : str
+        Model name to format
+    with_ssl : bool
+        If True, prefix with 'ssl' or 'scaled ssl'
+    use_ssl_names : bool
+        If True, use descriptive SSL names:
+        - λ=0.0 → iSSL (invariant SSL)
+        - λ=0.5 → CE-SSL (contrastive-equivariant SSL)
+        With "scaled" prefix for scaled versions.
+        If False (default), use lambda notation (λ=X.X) for all values.
     """
+    is_scaled = 'scaled ssl' in name
+    is_ssl = 'ssl' in name
+    
     if name.startswith('CochDNN9 ssl ') or name.startswith('CochDNN9 scaled ssl '):
-        label = lambda_label(name)
+        # Extract lambda value
+        match = re.search(r'(?:λ|lambda)\s*=\s*([0-9.]+)', name, re.IGNORECASE)
+        if match:
+            lambda_val = match.group(1)
+            
+            if use_ssl_names:
+                # Map lambda values to descriptive names
+                if lambda_val in ['0.0', '0']:
+                    label = 'iSSL'
+                elif lambda_val in ['0.5']:
+                    label = 'CE-SSL'
+                else:
+                    label = f'λ={lambda_val}'
+                
+                # Add scaled prefix if applicable
+                if is_scaled:
+                    label = f'scaled {label}'
+            else:
+                # Use lambda notation
+                label = f'λ={lambda_val}'
+        else:
+            label = strip_cochdnn9(name)
     else:
         label = strip_cochdnn9(name)
+    
     if with_ssl:
-        if 'scaled ssl' in name:
+        if is_scaled:
             label = f'scaled ssl {label}'
-        elif 'ssl' in name:
+        elif is_ssl:
             label = f'ssl {label}'
 
     # Display label for supervised audioset
