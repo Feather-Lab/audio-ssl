@@ -24,13 +24,14 @@ MODEL_SR = 20_000
 BYOLA_SR = 16_000
 DEFAULT_SIG_LENGTH = 40_000
 
+config_dir = Path("/mnt/ceph/users/igriffith/projects/cochdnn/")
 
 def get_cochdnn9_models(
     layer_out: str = "relufc",
     device: str = "cuda",
 ) -> tuple[Dict[str, torch.nn.Module], Dict[str, str]]:
     """
-    Load CochDNN9 and BYOL-A models for zero-shot tasks.
+    Load CochCNN9 and BYOL-A models for zero-shot tasks.
 
     Returns:
         models: dict mapping internal key -> model
@@ -59,22 +60,29 @@ def get_cochdnn9_models(
     model_name_map: Dict[str, str] = {}
 
     for key, rel_path in ssl_configs:
-        models[key] = get_model(Path(rel_path), layer_out=layer_out)
-        model_name_map[key] = f"CochDNN9 ssl λ={key.split('=')[1]}"
+        models[key] = get_model(config_dir / rel_path, layer_out=layer_out)
+        model_name_map[key] = f"CochCNN9 ssl λ={key.split('=')[1]}"
 
     for key, rel_path in scaled_ssl_configs:
-        models[key] = get_model(Path(rel_path), layer_out=layer_out)
-        model_name_map[key] = f"CochDNN9 scaled ssl λ={key.split('=')[1]}"
+        models[key] = get_model(config_dir / rel_path, layer_out=layer_out)
+        model_name_map[key] = f"CochCNN9 scaled ssl λ={key.split('=')[1]}"
 
     for key, rel_path in supervised_configs:
-        models[key] = get_model(Path(rel_path), supervised=True, layer_out=layer_out)
-    model_name_map["word"] = "CochDNN9 supervised word"
-    model_name_map["audioset"] = "CochDNN9 supervised audioset"
-    model_name_map["multitask"] = "CochDNN9 supervised multi-task"
-    model_name_map["unbal_audioset"] = "CochDNN9 scaled supervised"
+        models[key] = get_model(config_dir / rel_path, supervised=True, layer_out=layer_out)
 
-    with open("byol-a/config.yaml", "r") as f:
+    # add random init model 
+    models["random_init"] = get_model(config_dir / "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01.yaml", random=True)
+    
+    model_name_map["random_init"] = "CochCNN9 random weights" 
+    model_name_map["word"] = "CochCNN9 supervised word"
+    model_name_map["audioset"] = "CochCNN9 supervised audioset"
+    model_name_map["multitask"] = "CochCNN9 supervised multi-task"
+    model_name_map["unbal_audioset"] = "CochCNN9 scaled supervised"
+
+    with open(config_dir / "byol-a/config.yaml", "r") as f:
         byola_config = yaml.load(f, Loader=yaml.FullLoader)
+    # use last conv for equitable comparison 
+    byola_config['classifier_layer'] = "features.10"
     models["byol-a"] = BYOLAModule(byola_config).cuda().eval()
     model_name_map["byol-a"] = "byol-a"
 
@@ -115,6 +123,32 @@ def _prepare_triplet_waves(
     return waves
 
 
+def batched_pearson_corrcoef(x, y, dim=-1):
+    """
+    Compute Pearson correlation along a dimension.
+    
+    Args:
+        x: tensor of shape (N, ...)
+        y: tensor of shape (N, ...)
+        dim: dimension along which to compute correlation
+    
+    Returns:
+        Correlation coefficient(s)
+    """
+    mean_x = torch.mean(x, dim=dim, keepdim=True)
+    mean_y = torch.mean(y, dim=dim, keepdim=True)
+    
+    xm = x - mean_x
+    ym = y - mean_y
+    
+    r_num = torch.sum(xm * ym, dim=dim)
+    r_den = torch.sqrt(torch.sum(xm ** 2, dim=dim) * torch.sum(ym ** 2, dim=dim))
+    
+    r = r_num / r_den
+    return r
+
+
+
 def distance_metrics_on_triplet(
     model: torch.nn.Module,
     clips: Dict[str, torch.Tensor],
@@ -151,7 +185,7 @@ def distance_metrics_on_triplet(
     neg_l2 = torch.norm(z_anchor - z_neg, p=2).item()
     pos_l2_sq = pos_l2**2
     neg_l2_sq = neg_l2**2
-
+    
     out: Dict[str, float] = {
         "pos_l2": pos_l2,
         "neg_l2": neg_l2,
@@ -162,13 +196,19 @@ def distance_metrics_on_triplet(
         "judgement_pos_lt_neg": int(pos_l2 < neg_l2),
     }
 
-    if include_cosine:
-        pos_cos = F.cosine_similarity(z_anchor, z_pos).item()
-        neg_cos = F.cosine_similarity(z_anchor, z_neg).item()
-        out["pos_cos"] = pos_cos
-        out["neg_cos"] = neg_cos
-        out["cos_judgement"] = int(pos_cos > neg_cos)
+    # include cosine sim
+    pos_cos = F.cosine_similarity(z_anchor, z_pos).item()
+    neg_cos = F.cosine_similarity(z_anchor, z_neg).item()
+    out["pos_cos"] = pos_cos
+    out["neg_cos"] = neg_cos
+    out["cos_judgement"] = int(pos_cos > neg_cos)
 
+    # include correlation 
+    pos_r = batched_pearson_corrcoef(z_anchor, z_pos, dim=-1).item()
+    neg_r = batched_pearson_corrcoef(z_anchor, z_neg, dim=-1).item()
+    out["pos_r"] = pos_r
+    out["neg_r"] = neg_r
+    out["r_judgement"] = int(pos_r > neg_r) 
     return out
 
 

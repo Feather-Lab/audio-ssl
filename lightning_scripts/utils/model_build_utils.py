@@ -80,12 +80,14 @@ class SupervisedFeatureExtractor(nn.Module):
         return all_outputs[self.layer_out]
 
 
-def get_model(config_path, supervised=False, layer_out=None):
+def get_model(config_path, supervised=False, layer_out="relu4", random=False):
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     checkpoint_path = get_checkpoint_path(config_path)
+    if random:
+        module = LitAudioSSL(config)
+        model = FeatureExtractor(module.model, layer_out=layer_out).eval().cuda()
+        return model
     if supervised:
-        if layer_out is None:
-            layer_out = 'relufc'
         module = LitWordAudioSetModel.load_from_checkpoint(checkpoint_path=checkpoint_path, config=config, strict=True).eval()
         model = SupervisedFeatureExtractor(module.model, layer_out=layer_out).eval().cuda()
     else:

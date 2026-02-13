@@ -9,26 +9,27 @@ import seaborn as sns
 
 # Standard model ordering and colors for consistent plotting across notebooks
 STANDARD_HUE_ORDER = [
-    # Supervised
-    'CochDNN9 supervised multi-task',
-    'CochDNN9 supervised word',
-    'CochDNN9 supervised audioset',
-    'CochDNN9 scaled supervised',
+    # Supervisedp
+    'CochCNN9 supervised multi-task',
+    'CochCNN9 supervised word',
+    'CochCNN9 supervised audioset',
+    'CochCNN9 scaled supervised',
+    'CochCNN9 scaled aud. event',
     # SSL / Equivariant
-    'CochDNN9 ssl λ=0.0',
-    'CochDNN9 ssl λ=0.1',
-    'CochDNN9 ssl λ=0.2',
-    'CochDNN9 ssl λ=0.3',
-    'CochDNN9 ssl λ=0.4',
-    'CochDNN9 ssl λ=0.5',
-    'CochDNN9 scaled ssl λ=0.0',
-    'CochDNN9 scaled ssl λ=0.5',
+    'CochCNN9 ssl λ=0.0',
+    'CochCNN9 ssl λ=0.1',
+    'CochCNN9 ssl λ=0.2',
+    'CochCNN9 ssl λ=0.3',
+    'CochCNN9 ssl λ=0.4',
+    'CochCNN9 ssl λ=0.5',
+    'CochCNN9 scaled ssl λ=0.0',
+    'CochCNN9 scaled ssl λ=0.5',
     # SSL / Dual
-    'CochDNN9 ssl dual λ=0.0',
-    'CochDNN9 ssl dual λ=0.0 unpaired augs',
-    'CochDNN9 ssl dual λ=0.01',
-    'CochDNN9 ssl dual λ=0.1',
-    'CochDNN9 ssl dual λ=0.5',
+    'CochCNN9 ssl dual λ=0.0',
+    'CochCNN9 ssl dual λ=0.0 unpaired augs',
+    'CochCNN9 ssl dual λ=0.01',
+    'CochCNN9 ssl dual λ=0.1',
+    'CochCNN9 ssl dual λ=0.5',
     # Resnets 50
     'resnet50 ssl λ=0.5',
     'resnet50 scaled ssl λ=0.5',
@@ -40,11 +41,33 @@ STANDARD_HUE_ORDER = [
 ]
 
 STANDARD_BASE_COLORS = {
-    'CochDNN9 supervised word': 'blue',
-    'CochDNN9 supervised audioset': 'orange',
-    'CochDNN9 scaled supervised': 'red',
-    'CochDNN9 supervised multi-task': 'grey',
+    'CochCNN9 supervised word': 'blue',
+    'CochCNN9 supervised audioset': 'orange',
+    'CochCNN9 scaled supervised': 'gold',
+    'CochCNN9 scaled aud. event': 'gold',
+    'CochCNN9 supervised multi-task': 'grey',
 }
+
+def get_x_labels(hue_order):
+    x_labels = []
+    for name in hue_order:
+        label = model_label(name)
+        if 'scaled ssl' in name:
+            if label.startswith('λ='):
+                lambda_val = label.replace('λ=', '')
+                x_labels.append(f"scaled ssl λ={lambda_val}")
+            else:
+                x_labels.append(f"scaled ssl {label}")
+        elif 'ssl' in name and 'scaled' not in name:
+            if label.startswith('λ='):
+                lambda_val = label.replace('λ=', '')
+                x_labels.append(f"ssl λ={lambda_val}")
+            else:
+                x_labels.append(f"ssl {label}")
+        else:
+            x_labels.append(label)
+    return x_labels
+
 
 
 def get_standard_hue_order():
@@ -88,17 +111,17 @@ def get_model_groups(hue_order=None):
         hue_order = get_standard_hue_order()
     
     supervised_names = [
-        'CochDNN9 supervised multi-task',
-        'CochDNN9 supervised word',
-        'CochDNN9 supervised audioset',
-        'CochDNN9 scaled supervised',
+        'CochCNN9 supervised multi-task',
+        'CochCNN9 supervised word',
+        'CochCNN9 supervised audioset',
+        'CochCNN9 scaled supervised',
     ]
     ssl_names = [
         name for name in hue_order
-        if name.startswith('CochDNN9 ssl ') and 'dual' not in name and 'scaled' not in name
+        if name.startswith('CochCNN9 ssl ') and 'dual' not in name and 'scaled' not in name
     ]
     scaled_ssl_names = [
-        name for name in hue_order if name.startswith('CochDNN9 scaled ssl ')
+        name for name in hue_order if name.startswith('CochCNN9 scaled ssl ')
     ]
     byol_names = ['byol-a']
     
@@ -128,11 +151,45 @@ def get_plot_groups(hue_order=None):
         ('Scaled\nSSL', scaled_ssl_names),
         ('BYOL-A', byol_names),
     ]
+    
+def set_bar_labels(axs,
+                   bars,
+                   plot_names,
+                   white_text_substrs=["word", "CE"],
+                   y_cut_for_olap=0.6,
+                   ymin_bars = 0.49,
+                   no_olap_pad=0.0225,
+                   x_shift_size = 0.05,
+                   fontsize=12,
+  ):
+    # Iterate over the bars and add text
+    
+    for ix, bar in enumerate(bars):
+        height = bar.get_height() 
+        if height > y_cut_for_olap:
+            height = ymin_bars
+        else:
+            height = bar.get_height() + no_olap_pad
 
+    
+        bar_name = plot_names[ix].replace('supervised', 'sup.')
+        text_color = "k"
+        if any(sub_str in bar_name for sub_str in white_text_substrs):
+            text_color = "white"
+        axs.text(
+            x_shift_size + (bar.get_x() + bar.get_width() / 2.),  # X-coordinate (center of the bar)
+            height,                               # Y-coordinate (top of the bar)
+            bar_name,                          # The text to display
+            ha='center',                          # Horizontal alignment
+            va='bottom',                          # Vertical alignment (places text slightly above)
+            rotation=90,
+            color=text_color,
+            fontsize=fontsize,
+        )
 
 def strip_cochdnn9(name):
-    """Remove 'CochDNN9 ' prefix from model name."""
-    return name.replace('CochDNN9 ', '')
+    """Remove 'CochCNN9 ' prefix from model name."""
+    return name.replace('CochCNN9 ', '')
 
 
 def lambda_label(name):
@@ -161,7 +218,7 @@ def model_label(name, with_ssl=False, use_ssl_names=False):
     is_scaled = 'scaled ssl' in name
     is_ssl = 'ssl' in name
     
-    if name.startswith('CochDNN9 ssl ') or name.startswith('CochDNN9 scaled ssl '):
+    if "ssl" in name:
         # Extract lambda value
         match = re.search(r'(?:λ|lambda)\s*=\s*([0-9.]+)', name, re.IGNORECASE)
         if match:
@@ -195,20 +252,23 @@ def model_label(name, with_ssl=False, use_ssl_names=False):
 
     # Display label for supervised audioset
     label = label.replace('supervised audioset', 'supervised aud. events')
+    label = label.replace('scaled supervised', "scaled aud. event")
+    label = label.replace('scaled sup', "scaled aud. event")
     return label
 
 
 def normalize_model_name(model_name):
     name = model_name
-    name = re.sub(r'\bkell2018\b', 'CochDNN9', name, flags=re.IGNORECASE)
+    name = re.sub(r'\bkell2018\b', 'CochCNN9', name, flags=re.IGNORECASE)
+    name = re.sub(r'\bCochDNN9\b', 'CochCNN9', name)  # Handle legacy naming
 
     name = re.sub(r'\bscaled ssl\b\s+eq\b', 'scaled ssl', name, flags=re.IGNORECASE)
     name = re.sub(r'\bssl\b\s+eq\b', 'ssl', name, flags=re.IGNORECASE)
 
-    # Apply SSL normalization rules to all architectures (CochDNN9, resnet18, resnet50, etc.)
+    # Apply SSL normalization rules to all architectures (CochCNN9, resnet18, resnet50, etc.)
     # Match any architecture prefix followed by ssl word/audioset
-    name = re.sub(r'\b(CochDNN9|resnet\d+)\b\s+ssl\s+word\b', r'\1 ssl λ=0.0', name, flags=re.IGNORECASE)
-    name = re.sub(r'\b(CochDNN9|resnet\d+)\b\s+ssl\s+audioset\b', r'\1 ssl λ=1.0', name, flags=re.IGNORECASE)
+    name = re.sub(r'\b(CochCNN9|resnet\d+)\b\s+ssl\s+word\b', r'\1 ssl λ=0.0', name, flags=re.IGNORECASE)
+    name = re.sub(r'\b(CochCNN9|resnet\d+)\b\s+ssl\s+audioset\b', r'\1 ssl λ=1.0', name, flags=re.IGNORECASE)
 
     if 'supervised' in name and 'jsin' in name and 'audioset' in name:
         name = re.sub(
@@ -222,7 +282,7 @@ def normalize_model_name(model_name):
         if 'supervised' in name:
             name = re.sub(
                 r'\bsupervised\b\s+unbalanced audioset',
-                'scaled supervised',
+                'scaled aud. event',
                 name,
                 flags=re.IGNORECASE,
             )
@@ -255,25 +315,29 @@ def _parse_lambda_value(name):
     return float(match.group(1)) if match else None
 
 
+# Fixed lambda values for consistent color mapping across all plots
+_FIXED_LAMBDA_VALUES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+
+
 def _palette_for_lambdas(hue_order, prefix, palette_name):
     names = [n for n in hue_order if n.startswith(prefix) and 'λ=' in n]
     if not names:
         return {}
-    lambdas = sorted({float(_parse_lambda_value(n)) for n in names if _parse_lambda_value(n) is not None})
-    colors = sns.color_palette(palette_name, n_colors=max(len(lambdas), 2))
-    color_map = dict(zip(lambdas, colors))
-    return {n: color_map[_parse_lambda_value(n)] for n in names if _parse_lambda_value(n) is not None}
+    # Use fixed lambda values for consistent colors across all plots
+    colors = sns.color_palette(palette_name, n_colors=len(_FIXED_LAMBDA_VALUES))
+    color_map = dict(zip(_FIXED_LAMBDA_VALUES, colors))
+    return {n: color_map[_parse_lambda_value(n)] for n in names if _parse_lambda_value(n) is not None and _parse_lambda_value(n) in color_map}
 
 
 def _palette_for_lambdas_matching(hue_order, match_fn, palette_name):
     names = [n for n in hue_order if match_fn(n) and 'λ=' in n]
     if not names:
         return {}
-    lambdas = sorted({float(_parse_lambda_value(n)) for n in names if _parse_lambda_value(n) is not None})
-    if not lambdas:
-        return {}
-    colors = sns.color_palette(palette_name, n_colors=max(len(lambdas), 2))
-    color_map = dict(zip(lambdas, colors))
+    # Use fixed lambda values for consistent colors across all plots
+    # This ensures the same model always gets the same color regardless of
+    # which other models are included in the current plot's hue_order
+    colors = sns.color_palette(palette_name, n_colors=len(_FIXED_LAMBDA_VALUES))
+    color_map = dict(zip(_FIXED_LAMBDA_VALUES, colors))
     result = {}
     for n in names:
         lambda_val = _parse_lambda_value(n)
@@ -309,10 +373,10 @@ def build_model_palette(hue_order, base_colors=None):
     palette.update(general_ssl)
     
     # Handle scaled SSL models - separate by architecture
-    # Scaled SSL for CochDNN9 - use Purples
+    # Scaled SSL for CochCNN9 - use Purples
     cochdnn9_scaled_ssl = _palette_for_lambdas_matching(
         hue_order, 
-        lambda n: 'scaled ssl' in n and n.startswith('CochDNN9'),
+        lambda n: 'scaled ssl' in n and n.startswith('CochCNN9'),
         'Purples'
     )
     palette.update(cochdnn9_scaled_ssl)
@@ -333,10 +397,10 @@ def build_model_palette(hue_order, base_colors=None):
     )
     palette.update(ssl_dual)
     
-    # Handle supervised CochDNN9 models that aren't in base_colors
-    cochdnn9_supervised = [n for n in hue_order if n.startswith('CochDNN9') and 'supervised' in n and n not in palette]
+    # Handle supervised CochCNN9 models that aren't in base_colors
+    cochdnn9_supervised = [n for n in hue_order if n.startswith('CochCNN9') and 'supervised' in n and n not in palette]
     if cochdnn9_supervised:
-        # Use a different palette for supervised CochDNN9 models not in base_colors
+        # Use a different palette for supervised CochCNN9 models not in base_colors
         colors = sns.color_palette('Blues', n_colors=max(len(cochdnn9_supervised), 2))
         for i, name in enumerate(cochdnn9_supervised):
             palette[name] = colors[i % len(colors)]
@@ -356,8 +420,8 @@ def build_model_palette(hue_order, base_colors=None):
         for i, name in enumerate(resnet_other):
             palette[name] = colors[i % len(colors)]
     
-    # Handle any other CochDNN9 models that don't have lambda (fallback)
-    cochdnn9_other = [n for n in hue_order if n.startswith('CochDNN9') and n not in palette]
+    # Handle any other CochCNN9 models that don't have lambda (fallback)
+    cochdnn9_other = [n for n in hue_order if n.startswith('CochCNN9') and n not in palette]
     if cochdnn9_other:
         colors = sns.color_palette('Greens', n_colors=max(len(cochdnn9_other), 2))
         for i, name in enumerate(cochdnn9_other):
@@ -665,6 +729,99 @@ def pointplot_by_model(
         ms=6,
     )
 
+def plot_sequential_bars(ax, data, value_col, title, ylabel, xlabel='Model', hue_order=None, hue_dict=None, 
+                         error_col=None, error_type=None, yerr=None, capsize=4, 
+                         bar_width=0.7):
+    """
+    Create sequential bar plot with models in order.
+    
+    Args:
+        ax: matplotlib axis
+        data: DataFrame with model_name and value_col columns
+        value_col: Column name for y-axis values
+        title: Plot title
+        ylabel: Y-axis label
+        xlabel: X-axis label
+        hue_order: Optional normalized hue_order. If None, uses standard.
+        hue_dict: Optional color palette dict. If None, builds from standard colors.
+        error_col: Optional column name containing error values. If provided, these will be used.
+        error_type: Optional string ('std' or 'sem') to calculate error bars from data.
+        yerr: Optional array/Series of error values.
+        capsize: Size of error bar caps (default: 4)
+        bar_width: Width of each bar (default: 0.7)
+    
+    Returns:
+        Tuple of (ax, legend_handles, legend_labels)
+    """
+    if hue_order is None:
+        hue_order = get_standard_hue_order()
+    if hue_dict is None:
+        base_colors = get_standard_base_colors()
+        hue_dict = build_model_palette(hue_order, base_colors)
+    
+    means = data.groupby('model_name', as_index=True)[value_col].mean()
+    
+    # Calculate error bars if requested
+    errors = None
+    if yerr is not None:
+        if hasattr(yerr, 'index'):
+            errors = yerr
+        else:
+            errors = pd.Series(yerr, index=means.index)
+    elif error_col is not None:
+        errors = data.groupby('model_name', as_index=True)[error_col].mean()
+    elif error_type is not None:
+        if error_type == 'std':
+            errors = data.groupby('model_name', as_index=True)[value_col].std()
+        elif error_type == 'sem':
+            stds = data.groupby('model_name', as_index=True)[value_col].std()
+            counts = data.groupby('model_name', as_index=True)[value_col].count()
+            errors = stds / (counts ** 0.5)
+        else:
+            raise ValueError(f"error_type must be 'std' or 'sem', got '{error_type}'")
+    
+    # Filter to models present in data
+    models = [m for m in hue_order if m in means.index]
+    
+    # Sequential x positions
+    x_positions = np.arange(len(models))
+    
+    legend_handles = []
+    legend_labels = []
+    
+    for i, model in enumerate(models):
+        color = hue_dict.get(model, '#444444')
+        label = model_label(model)
+        
+        # Get error value for this model if errors are provided
+        error_val = None
+        if errors is not None and model in errors.index:
+            error_val = errors.loc[model]
+        
+        # Build bar arguments
+        bar_kwargs = {
+            'width': bar_width,
+            'color': color,
+            'edgecolor': 'black',
+            'linewidth': 0.6,
+            'label': label,
+        }
+        if error_val is not None:
+            bar_kwargs['yerr'] = error_val
+            bar_kwargs['capsize'] = capsize
+        
+        bar = ax.bar(x_positions[i], means.loc[model], **bar_kwargs)
+        legend_handles.append(bar[0])
+        legend_labels.append(label)
+    
+    ax.set_xticks(x_positions)
+    ax.set_xticklabels([model_label(m) for m in models], rotation=45, ha='right')
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
+    
+    return ax, legend_handles, legend_labels
+    
 
 def plot_grouped_bars(ax, data, value_col, title, ylabel, xlabel='Model Group', hue_order=None, hue_dict=None, 
                       error_col=None, error_type=None, yerr=None, capsize=4, 
@@ -725,7 +882,7 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, xlabel='Model Group', 
     plot_groups = get_plot_groups(hue_order)
     
     bar_width = bar_width
-    group_gap = 0.6
+    group_gap = group_gap
     
     xticks = []
     xticklabels = []
@@ -776,7 +933,7 @@ def plot_grouped_bars(ax, data, value_col, title, ylabel, xlabel='Model Group', 
     ax.set_xlabel(xlabel)
     ax.set_title(title)
     
-    return legend_handles, legend_labels
+    return ax, legend_handles, legend_labels
 
 
 def plot_fmri_components(results_df, exclude_pattern="spectemp|dual|1.0", 
@@ -1000,3 +1157,137 @@ def plot_fmri_components(results_df, exclude_pattern="spectemp|dual|1.0",
     
     plt.tight_layout()
     return fig, axes
+
+
+def add_supervised_reference_lines(
+    ax,
+    df,
+    value_col="overall_acc",
+    max_x_pos=0,
+    min_x_pos=0,
+    ylim_pad=(0.95, 1.05),
+    fontsize=8,
+):
+    """
+    Add dashed reference lines for best/worst supervised models with arrow annotations.
+
+    Parameters
+    ----------
+    ax : matplotlib axes
+        The axes to draw on
+    df : pandas DataFrame
+        DataFrame containing all models (will be filtered to supervised only)
+    value_col : str
+        Column name containing the metric values
+    max_x_pos : float
+        X position for the max annotation
+    min_x_pos : float
+        X position for the min annotation
+    ylim_pad : tuple
+        Padding (bottom, top) to add to ylim beyond the min/max values
+    fontsize : int
+        Font size for labels
+    """
+    sup_data = df[df.model_name.str.contains("sup", na=False)]
+
+    if sup_data.empty:
+        return None, None
+
+    min_val, max_val = sup_data[value_col].agg(["min", "max"])
+
+    ax.axhline(
+        min_val,
+        color="black",
+        linestyle="--",
+        alpha=0.5,
+    )
+    ax.axhline(
+        max_val,
+        color="black",
+        linestyle="--",
+        alpha=0.5,
+    )
+
+    ax.set_ylim(min_val * ylim_pad[0], max_val * ylim_pad[1])
+
+    arrow_props = dict(arrowstyle="->", color="black", lw=1)
+
+    ax.annotate(
+        "Best\nsupervised",
+        xy=(max_x_pos, max_val),
+        xytext=(max_x_pos, max_val + 0.04),
+        ha="center",
+        va="bottom",
+        fontsize=fontsize,
+        arrowprops=arrow_props,
+    )
+
+    ax.annotate(
+        "Worst\nsupervised",
+        xy=(min_x_pos, min_val),
+        xytext=(min_x_pos, max_val + 0.04),
+        ha="center",
+        va="bottom",
+        fontsize=fontsize,
+        arrowprops=arrow_props,
+    )
+
+    return min_val, max_val
+
+
+def simple_bar_plot(ax, data, value_col, error_col, title, ylabel, hue_dict, bar_width=1.0, x_pad=0.5, fontsize=12):
+    """
+    Simple bar plot with lambda values on x-axis.
+    
+    Parameters
+    ----------
+    ax : matplotlib axes
+        The axes to draw on
+    data : pandas DataFrame
+        DataFrame containing the data to plot
+    value_col : str
+        Column name containing the metric values
+    error_col : str
+        Column name containing error values
+    title : str
+        Plot title
+    ylabel : str
+        Y-axis label
+    hue_dict : dict
+        Dictionary mapping model names to colors
+    bar_width : float
+        Width of bars
+    x_pad : float
+        Padding on x-axis
+    """
+    # Group by model and get means
+    means = data.groupby('model_name')[value_col].mean()
+    errors = data.groupby('model_name')[error_col].mean() if error_col else None
+    
+    # Sort by lambda value
+    data = data.sort_values('eq_lmbda').copy()
+    lambda_vals = data['eq_lmbda'].unique()
+    models = data.model_name.unique()
+    
+    # Create x positions
+    x = np.arange(len(models))  
+    
+    # Get colors and labels (just the number, no "λ=")
+    colors = [hue_dict.get(model, '#444444') for model in models]
+    labels = [re.search(r'λ=([0-9.]+)', m).group(1) if 'λ=' in m else m for m in models]
+    
+    # Plot bars
+    bars = ax.bar(x, means, width=bar_width, color=colors, edgecolor='black', linewidth=0.5)
+    
+    # Add error bars if available
+    ax.errorbar(x, means, yerr=errors, fmt='none', color='black', capsize=0, linewidth=1)
+    
+    # Set labels (no rotation)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_title(title, fontsize=fontsize)
+    ax.set_ylabel(ylabel, fontsize=fontsize)
+    ax.set_xlabel('SSL λ', fontsize=fontsize)
+    ax.set_xlim(-x_pad, len(x) + x_pad - 1)
+    
+    return bars, labels
