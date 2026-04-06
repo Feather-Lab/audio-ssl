@@ -11,11 +11,32 @@ from argparse import ArgumentParser, BooleanOptionalAction
 
 from lightning_ssl_classifier import SSLClassifier
 from lightning_byola_classifier import BYOLAClassifier
+from audiomae_transfer_module import AudioMAETransferModule
 from whisper_encoder_arch import get_whisper_encoder_layer_map
 from jsinV3DataLoader_precombined_batched import CleanSpeechInNoiseValDatasetBatched
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import WandbLogger
+
+
+def _parse_audiomae_layer_str(layer_str: str) -> tuple:
+    """Parse a layer_str into (encoder_layer_idx, layer_name) for AudioMAE.
+
+    Accepts 'block_N', 'norm', or a bare integer string.
+    Returns (int index for encoder_layer config, str for naming).
+    """
+    if layer_str == "norm":
+        return 12, "norm"
+    if layer_str.startswith("block_"):
+        idx = int(layer_str.split("_")[-1])
+        return idx, layer_str
+    if layer_str.isdigit():
+        idx = int(layer_str)
+        return idx, f"block_{idx}" if idx < 12 else "norm"
+    raise ValueError(
+        f"Invalid AudioMAE layer_str '{layer_str}'. "
+        "Use 'block_N' (0-11), 'norm', or an integer."
+    )
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -23,20 +44,37 @@ torch.backends.cudnn.allow_tf32 = True
 
 def cli_main(args):
     L.seed_everything(args.random_seed)
-    
-    # Load config
-    if args.config_path != "":
-        config_path = pathlib.Path(args.config_path)
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-        config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
-    elif args.config_list_path != "":
-        with open(args.config_list_path, 'rb') as f:
-            config_dict = pickle.load(f)
-            config_path = pathlib.Path(config_dict[args.array_ix])
-            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+
+    use_audiomae = args.model_type == 'audiomae'
+
+    if use_audiomae:
+        audiomae_layer_idx, audiomae_layer_name = _parse_audiomae_layer_str(args.layer_str)
+        config = {
+            'model': {
+                'arch_name': 'audiomae_pretrained',
+                'arch_kwargs': {
+                    'encoder_layer': audiomae_layer_idx,
+                    'time_average': False if args.time_avg_rep is None else args.time_avg_rep,
+                },
+            },
+            'hparas': {},
+            'data': {},
+        }
+        config_path = pathlib.Path('audiomae_pretrained')
     else:
-        raise ValueError("Must provide either config_path or config_list_path")
+        # Load config
+        if args.config_path != "":
+            config_path = pathlib.Path(args.config_path)
+            if not config_path.exists():
+                raise FileNotFoundError(f"Config file not found: {config_path}")
+            config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+        elif args.config_list_path != "":
+            with open(args.config_list_path, 'rb') as f:
+                config_dict = pickle.load(f)
+                config_path = pathlib.Path(config_dict[args.array_ix])
+                config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+        else:
+            raise ValueError("Must provide either config_path or config_list_path")
 
     print(f"Evaluating config: {config_path}")
     
@@ -46,7 +84,9 @@ def cli_main(args):
     # Only treat as pretrained whisper when explicitly requested.
     use_whisper_pretrained = args.model_type == 'whisper'
     
-    if use_whisper_pretrained:
+    if use_audiomae:
+        pass  # handled above
+    elif use_whisper_pretrained:
         use_whisper = True
     elif config.get('model', {}).get('arch_kwargs', {}).get('backbone') == 'whisper':
         use_whisper = True
@@ -116,8 +156,7 @@ def cli_main(args):
     config['hparas']['global_batch_size'] = int(args.batch_size * args.gpus)
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
-    # used 2 gpus for training, mult by 2 for now to get same checkpoint 
-    if not use_whisper:  # Whisper uses the SSL encoder backbone
+    if not use_whisper and not use_audiomae:
         if 'model' not in config:
             config['model'] = {}
         if 'arch_kwargs' not in config['model']:
@@ -126,12 +165,11 @@ def cli_main(args):
             config['model']['arch_kwargs']['supervised'] = False
 
     config['with_noise'] = args.with_noise
-    # don't load in classifier head if it exists 
     config['hparas']['lr'] = args.lr 
     config['hparas']['epochs'] = args.train_epochs
     if 'arch_kwargs' not in config['model'].keys():
         config['model']['arch_kwargs'] = {}
-    if not use_whisper:
+    if not use_whisper and not use_audiomae:
         config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['crop_audio'] = args.crop_audio
 
@@ -207,26 +245,36 @@ def cli_main(args):
         dropout_str = ""
 
 
-    # get checkpoint for ssl model 
-    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-    if args.ckpt_path == "":
-        ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        if len(ckpt_paths) > 0:
-            ckpt_path = ckpt_paths[-1] # get latest checkpoint 
-            print(ckpt_path)
-        ckpt_modifier = ''
-
+    # get checkpoint for ssl model
+    ckpt_path = None
+    ckpt_modifier = ''
+    if use_audiomae:
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / "audiomae/checkpoints"
     else:
-        ckpt_path = args.ckpt_path
-        ckpt_modifier = '_from_best_val_ckpt'
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
+        if args.ckpt_path == "":
+            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+            if len(ckpt_paths) > 0:
+                ckpt_path = ckpt_paths[-1] # get latest checkpoint 
+                print(ckpt_path)
+        else:
+            ckpt_path = args.ckpt_path
+            ckpt_modifier = '_from_best_val_ckpt'
     
     w_noise_modifier = '_with_noise' if args.with_noise else ""
-    
-    layer_component = whisper_layer_str if use_whisper else args.layer_str.replace('.', '_')
+
+    if use_audiomae:
+        layer_component = audiomae_layer_name
+    elif use_whisper:
+        layer_component = whisper_layer_str
+    else:
+        layer_component = args.layer_str.replace('.', '_')
     str_modifier = f"{task_str}_{layer_component}_{time_avg_str}{config['hparas']['optimizer']}_{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{w_noise_modifier}{crop_audio_str}{dropout_str}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/linear_classifier_checkpoints_{str_modifier}"
 
-    if use_byola:
+    if use_audiomae:
+        module = AudioMAETransferModule(config=config)
+    elif use_byola:
         module = BYOLAClassifier(config=config)
     else:
         module = SSLClassifier(config=config,
@@ -321,7 +369,9 @@ def cli_main(args):
             labels[label_key] = torch.from_numpy(targets[label_key])
         return audio, labels
 
-    if use_whisper_pretrained:
+    if use_audiomae:
+        eval_collate_fn = module.eval_collate_fn
+    elif use_whisper_pretrained:
         eval_collate_fn = module.eval_collate_fn
     elif 'byol-a' in str(config_path):
         eval_collate_fn = module.predict_collate_fn
@@ -412,7 +462,7 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('--config_path', default='', type=str, help='Path to experiment config.')
     parser.add_argument('--config_list_path', default='', type=str, help='Path to experiment config.')
-    parser.add_argument('--model_type', default='', type=str, help='Model type: "whisper", "byola", or "ssl" (auto-detected if not specified).')
+    parser.add_argument('--model_type', default='', type=str, help='Model type: "whisper", "audiomae", "byola", or "ssl" (auto-detected if not specified).')
     parser.add_argument(
         "--results_dir",
         default=pathlib.Path("./eval_jsin_results"),

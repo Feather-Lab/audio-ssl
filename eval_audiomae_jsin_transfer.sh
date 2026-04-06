@@ -2,11 +2,11 @@
 #SBATCH --job-name=audiomae_jsin
 #SBATCH --output=outLogs/audiomae_jsin_transfer_%A_%a.out
 #SBATCH --error=outLogs/audiomae_jsin_transfer_%A_%a.err
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-gpu=8
-#SBATCH --mem=64Gb
-#SBATCH --time=2-01:00:00
+#SBATCH --mem=200Gb
+#SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb
@@ -21,13 +21,15 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-srun python3 lightning_scripts/eval_audiomae_jsin_transfer.py \
-    --layer_idx 11 \
+srun python3 lightning_scripts/eval_jsin_transfer_matched.py \
+    --model_type audiomae \
+    --layer_str 'norm' \
     --gpus $num_gpus --num_workers $SLURM_JOB_CPUS_PER_NODE \
     --model_ckpt_dir model_checkpoints \
-    --batch_size 192 \
-    --optimizer "AdamW" --lr 0.0005 \
-    --task 'both' \
+    --batch_size 512 \
+    --optimizer "AdamW" --lr 0.001 \
+    --task 'word' \
     --train_epochs 6 \
+    --gpus $num_gpus \
     --checkpoint_every_n_steps 2000 \
-    --no-with_noise --no-eval_only --lr_scheduler --use_classifier_ckpt --with_dropout
+    --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-with_dropout

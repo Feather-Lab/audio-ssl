@@ -17,13 +17,17 @@ mamba activate cochdnn_ssl_pl
 
 export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
 
-echo "Job array ID: $SLURM_ARRAY_TASK_ID  (layers 0-11 = ViT blocks, 12 = norm)"
+LAYERS=(block_0 block_1 block_2 block_3 block_4 block_5 block_6 block_7 block_8 block_9 block_10 block_11 norm)
+LAYER=${LAYERS[$SLURM_ARRAY_TASK_ID]}
 
-python3 lightning_scripts/eval_audiomae_nsynth.py \
-    --layer_idx $SLURM_ARRAY_TASK_ID \
+echo "Job array ID: $SLURM_ARRAY_TASK_ID  Layer: $LAYER"
+
+python3 lightning_scripts/eval_nsynth_linear.py \
+    --encoder_type audiomae \
+    --layer_str $LAYER \
     --gpus 1 --num_workers $SLURM_JOB_CPUS_PER_NODE \
     --batch_size 256 \
     --optimizer "AdamW" --lr 0.001 \
     --task "family" \
     --train_epochs 20 \
-    --no-eval_only --lr_scheduler
+    --eval_only --lr_scheduler --classifier_ckpt_path model_checkpoints/audiomae/nsynth_family/norm/epoch=8-step=10170.ckpt

@@ -27,8 +27,25 @@ from byol_a.common import *
 from byol_a.augmentations import PrecomputedNorm
 from byol_a.models import AudioNTT2020
 from easydict import EasyDict
+from audiomae_speech_commands_module import AudioMAESpeechCommandsClassifier
 
 torch.set_float32_matmul_precision('medium')
+
+
+def _parse_audiomae_layer_str(layer_str: str) -> tuple:
+    """Parse a layer_str into (encoder_layer_idx, layer_name) for AudioMAE."""
+    if layer_str == "norm":
+        return 12, "norm"
+    if layer_str.startswith("block_"):
+        idx = int(layer_str.split("_")[-1])
+        return idx, layer_str
+    if layer_str.isdigit():
+        idx = int(layer_str)
+        return idx, f"block_{idx}" if idx < 12 else "norm"
+    raise ValueError(
+        f"Invalid AudioMAE layer_str '{layer_str}'. "
+        "Use 'block_N' (0-11), 'norm', or an integer."
+    )
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
@@ -558,28 +575,55 @@ class BYOLAClassifier(L.LightningModule):
 def cli_main(args):
     L.seed_everything(args.random_seed)
 
-    if args.config_path != "":
-        config_path = pathlib.Path(args.config_path)
-    elif args.config_list_path != "":
-        with open(args.config_list_path, 'rb') as f:
-            config_dict = pickle.load(f)
-            config_path = pathlib.Path(config_dict[args.array_ix])
+    use_audiomae = getattr(args, 'model_type', '') == 'audiomae'
 
-    print(f"Evaluating config: {config_path}")
-    config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+    if use_audiomae:
+        audiomae_layer_idx, audiomae_layer_name = _parse_audiomae_layer_str(args.layer_str)
+        config_path = pathlib.Path('audiomae_pretrained')
 
-    # update config for transfer learning task
-    # config['data'] = {}
+        audiomae_config = {
+            "encoder_layer": audiomae_layer_idx,
+            "time_average": True,
+            "optimizer": args.optimizer,
+            "lr": args.lr,
+            "lr_schedule": bool(args.lr_scheduler),
+            "batch_size": args.batch_size,
+            "num_workers": args.num_workers,
+            "num_gpus": args.gpus,
+            "classifier_hidden_dims": [args.mlp_dim] if args.w_mlp else None,
+        }
 
-    use_byola = False 
-    if 'byol-a' in str(config_path):
+        config = {
+            'model': {'arch_kwargs': {}},
+            'hparas': {
+                'batch_size': args.batch_size,
+                'optimizer': args.optimizer,
+                'lr': args.lr,
+                'epochs': 5,
+            },
+            'data': {'eval_max': 3},
+            'num_workers': args.num_workers,
+            'num_gpus': args.gpus,
+        }
+    else:
+        if args.config_path != "":
+            config_path = pathlib.Path(args.config_path)
+        elif args.config_list_path != "":
+            with open(args.config_list_path, 'rb') as f:
+                config_dict = pickle.load(f)
+                config_path = pathlib.Path(config_dict[args.array_ix])
+        else:
+            raise ValueError("Must provide either config_path, config_list_path, or --model_type audiomae")
+
+        print(f"Evaluating config: {config_path}")
+        config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
+
+    use_byola = False
+    if not use_audiomae and 'byol-a' in str(config_path):
         use_byola = True 
         config['model'] = {}
         config['hparas'] = {}
         config['audio_transforms'] = {} 
-        # config['audio_transforms']['low_snr'] = -10
-        # config['audio_transforms']['high_snr'] = 10
-        # config['audio_transforms']['rms_level'] = 60
         config['model']['arch_kwargs'] = {}
         config['data'] = {}
 
@@ -588,55 +632,59 @@ def cli_main(args):
     config['hparas']['batch_size'] = args.batch_size
     config['data']['eval_max'] = 3
     config['hparas']['optimizer'] = args.optimizer
-    # used 2 gpus for training, mult by 2 for now to get same checkpoint 
     config['hparas']['lr'] = args.lr 
-    config['hparas']['epochs'] = 5
-    # don't load in classifier head if it exists 
-    if not args.supervised_backbone:
-        config['model']['arch_kwargs']['supervised'] =  False
+    config['hparas']['epochs'] = args.train_epochs
 
-    if 'arch_kwargs' not in config['model'].keys():
-        config['model']['arch_kwargs'] = {}
-        
-    config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
+    if not use_audiomae:
+        if not args.supervised_backbone:
+            config['model']['arch_kwargs']['supervised'] = False
+        if 'arch_kwargs' not in config['model'].keys():
+            config['model']['arch_kwargs'] = {}
+        config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
 
     time_avg_str = ""
-    if not args.time_avg_rep:
+    if not use_audiomae and not args.time_avg_rep:
         time_avg_str = "full_rep_"
 
     scheduler_str = ""
     if args.lr_scheduler:
-        config['hparas']['lr_schedule'] = True
-        config['hparas']['num_warmup_steps_or_ratio'] = 0
+        if not use_audiomae:
+            config['hparas']['lr_schedule'] = True
+            config['hparas']['num_warmup_steps_or_ratio'] = 0
         scheduler_str = "_cosine_lr_scheduler_"
-
 
     print(f"Running speech commands transfer")
     
     if args.w_mlp:
-        config['model']['classifier'] = {}
-        config['model']['classifier']['hidden_dims'] = [args.mlp_dim]
+        if not use_audiomae:
+            config['model']['classifier'] = {}
+            config['model']['classifier']['hidden_dims'] = [args.mlp_dim]
         mlp_str = "_w_mlp"
     else:
         mlp_str = ""
 
-    # get checkpoint for ssl model 
-    checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-    if args.ckpt_path == "":
-        ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
-        if len(ckpt_paths) > 0:
-            ckpt_path = ckpt_paths[-1] # get latest checkpoint 
-            print(ckpt_path)
-        ckpt_modifier = ''
-
+    ckpt_path = None
+    ckpt_modifier = ''
+    if use_audiomae:
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / "audiomae/checkpoints"
     else:
-        ckpt_path = args.ckpt_path
-        ckpt_modifier = '_from_best_val_ckpt'
-    
-    str_modifier = f"{config['hparas']['optimizer']}_{args.layer_str}_{time_avg_str}{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
+        if args.ckpt_path == "":
+            ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
+            if len(ckpt_paths) > 0:
+                ckpt_path = ckpt_paths[-1]
+                print(ckpt_path)
+        else:
+            ckpt_path = args.ckpt_path
+            ckpt_modifier = '_from_best_val_ckpt'
+
+    layer_component = audiomae_layer_name if use_audiomae else args.layer_str
+    str_modifier = f"{config['hparas']['optimizer']}_{layer_component}_{time_avg_str}{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/speech_commands_linear_classifier_checkpoints/{str_modifier}"
 
-    if use_byola:
+    if use_audiomae:
+        module = AudioMAESpeechCommandsClassifier(config=audiomae_config)
+    elif use_byola:
         module = BYOLAClassifier(config=config)
     else:
         module = SSLClassifier(config=config,
@@ -794,6 +842,8 @@ if __name__ == "__main__":
     parser.add_argument('--array_ix', default=0, type=int, help='Slurm job array index')
     parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
     parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
+    parser.add_argument('--train_epochs', default=5, type=int, help='Number of training epochs.')
+    parser.add_argument('--model_type', default='', type=str, help='Model type: "audiomae" for pretrained AudioMAE (no config file needed).')
 
     args = parser.parse_args()
 

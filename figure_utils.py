@@ -156,32 +156,49 @@ def set_bar_labels(axs,
                    bars,
                    plot_names,
                    white_text_substrs=["word", "CE"],
-                   y_cut_for_olap=0.6,
-                   ymin_bars = 0.49,
+                   ymin_bars=0.49,
                    no_olap_pad=0.0225,
-                   x_shift_size = 0.05,
                    fontsize=12,
-  ):
-    # Iterate over the bars and add text
-    
-    for ix, bar in enumerate(bars):
-        height = bar.get_height() 
-        if height > y_cut_for_olap:
-            height = ymin_bars
-        else:
-            height = bar.get_height() + no_olap_pad
+                   sem_vals=None,
+    ):
 
-    
+    fig = axs.get_figure()
+    # Y axis size conversion (needed for rotation offset)
+    ax_height_inches = fig.get_figheight() * axs.get_position().height
+    ymin, ymax = axs.get_ylim()
+    points_per_y_data_unit = ax_height_inches * 72 / (ymax - ymin)
+    char_height_data_y = fontsize / points_per_y_data_unit * 0.6
+
+    # X axis size conversion (needed for rotation offset)
+    ax_width_inches = fig.get_figwidth() * axs.get_position().width
+    xmin, xmax = axs.get_xlim()
+    points_per_x_data_unit = ax_width_inches * 72 / (xmax - xmin)
+    char_height_data_x = fontsize / points_per_x_data_unit
+
+    for ix, bar in enumerate(bars):
+        bar_height = bar.get_height()
+        bar_interior = bar_height - ymin_bars
+
         bar_name = plot_names[ix].replace('supervised', 'sup.')
-        text_color = "k"
-        if any(sub_str in bar_name for sub_str in white_text_substrs):
-            text_color = "white"
+        label_height_data = len(bar_name) * char_height_data_y
+
+        if label_height_data < bar_interior:
+            y = ymin_bars
+            text_color = "k"
+            if white_text_substrs and any(sub_str in bar_name for sub_str in white_text_substrs):
+                text_color = "white"
+        else:
+            top = bar_height + (sem_vals[ix] if sem_vals is not None else 0.0)
+            y = top + no_olap_pad
+            text_color = "k"
+
+        x = (bar.get_x() + bar.get_width() / 2.) + (char_height_data_x / 2)  # compensate rotation pivot
         axs.text(
-            x_shift_size + (bar.get_x() + bar.get_width() / 2.),  # X-coordinate (center of the bar)
-            height,                               # Y-coordinate (top of the bar)
-            bar_name,                          # The text to display
-            ha='center',                          # Horizontal alignment
-            va='bottom',                          # Vertical alignment (places text slightly above)
+            x,
+            y,
+            bar_name,
+            ha='center',
+            va='bottom',
             rotation=90,
             color=text_color,
             fontsize=fontsize,

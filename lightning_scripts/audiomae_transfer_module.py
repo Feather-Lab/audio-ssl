@@ -58,9 +58,11 @@ class AudioMAETransferModule(L.LightningModule):
 
         self.encoder_layer_idx = config["model"]["arch_kwargs"].get("encoder_layer", 11)
         self.n_blocks = len(self.audiomae_encoder.blocks)
+        self.use_norm = self.encoder_layer_idx >= self.n_blocks
 
         self.encoder_activations = {}
-        self._register_encoder_hook()
+        if not self.use_norm:
+            self._register_encoder_hook()
 
         time_pool = config["model"]["arch_kwargs"].get("time_average", True)
         self.time_pool = time_pool
@@ -152,9 +154,13 @@ class AudioMAETransferModule(L.LightningModule):
         """Run frozen AudioMAE and return flattened features from the hooked layer."""
         with torch.no_grad():
             self.encoder_activations.clear()
-            self.audiomae_encoder.forward_features(mel)
+            full_out = self.audiomae_encoder.forward_features(mel)
 
-            tokens = self.encoder_activations["layer_output"]  # (B, 513, 768)
+            if self.use_norm:
+                tokens = full_out
+            else:
+                tokens = self.encoder_activations["layer_output"]
+
             tokens = tokens[:, 1:, :]  # remove CLS -> (B, 512, 768)
 
             feats = tokens.reshape(

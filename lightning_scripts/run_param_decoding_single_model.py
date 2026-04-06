@@ -30,6 +30,11 @@ from lightning_scripts.lightning_classifier_matched_speech_in_noise import (
     LitWordAudioSetModel,
 )
 from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL
+from lightning_scripts.audiomae_encoder_utils import (
+    AUDIOMAE_SR,
+    AudioMAELayerwiseEncoder,
+    parse_audiomae_layer_str,
+)
 
 # Configure PyTorch
 torch.set_float32_matmul_precision("medium")
@@ -398,7 +403,10 @@ AUGMENTATION_CONFIGS = [
 
 
 def get_rep_wrapped_model(
-    model: torch.nn.Module, input_tensor: torch.Tensor, layer: str
+    model: torch.nn.Module,
+    input_tensor: torch.Tensor,
+    layer: str,
+    waveform_sr: Optional[int] = None,
 ) -> torch.Tensor:
     """Extract representation from model at specified layer.
 
@@ -406,10 +414,18 @@ def get_rep_wrapped_model(
         model: Model to extract representations from
         input_tensor: Input tensor
         layer: Layer name to extract from
+        waveform_sr: Sample rate of ``input_tensor`` when ``model`` is AudioMAE
+            (e.g. JSIN at 20 kHz). Ignored for Kell/SSL models.
 
     Returns:
         Flattened representation tensor
     """
+    if isinstance(model, AudioMAELayerwiseEncoder):
+        sr_use = waveform_sr if waveform_sr is not None else AUDIOMAE_SR
+        embeddings = model(input_tensor, sr=sr_use)
+        rep = embeddings[layer]
+        return rep.flatten(start_dim=1) if rep.dim() > 2 else rep
+
     if layer == "invar_head":
         feature, rep, logits = model(input_tensor)
         if len(rep) == 2:
@@ -430,6 +446,7 @@ def extract_features_param_decoding(
     loader: torch.utils.data.DataLoader,
     layer: str = "avgpool",
     num_batches: Optional[int] = None,
+    waveform_sr: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, None]:
     """Extract features for parameter decoding.
 
@@ -438,6 +455,7 @@ def extract_features_param_decoding(
         loader: Data loader
         layer: Layer to extract representations from
         num_batches: Number of batches to process (None for all)
+        waveform_sr: Input waveform sample rate for AudioMAE (ignored otherwise)
 
     Returns:
         Tuple of (clean_responses, augmented_responses, params, None)
@@ -454,10 +472,14 @@ def extract_features_param_decoding(
             clean_audio = clean_audio.cuda()
             augmented_audio = augmented_audio.cuda()
             responses_clean.append(
-                get_rep_wrapped_model(model, clean_audio, layer).cpu()
+                get_rep_wrapped_model(
+                    model, clean_audio, layer, waveform_sr=waveform_sr
+                ).cpu()
             )
             responses_augmented.append(
-                get_rep_wrapped_model(model, augmented_audio, layer).cpu()
+                get_rep_wrapped_model(
+                    model, augmented_audio, layer, waveform_sr=waveform_sr
+                ).cpu()
             )
 
             params.append(param)
@@ -612,6 +634,7 @@ class ParameterDecodingEvaluator:
         layer: str,
         ridge_alpha: float = 0.0,
         num_workers: int = 1,
+        waveform_sr: Optional[int] = None,
     ):
         """Initialize the evaluator.
         
@@ -620,11 +643,13 @@ class ParameterDecodingEvaluator:
             layer: Layer name to extract representations from
             ridge_alpha: Ridge regularization parameter
             num_workers: Number of data loader workers
+            waveform_sr: Sample rate for AudioMAE inputs (None for Kell/SSL models)
         """
         self.model = model
         self.layer = layer
         self.ridge_alpha = ridge_alpha
         self.num_workers = num_workers
+        self.waveform_sr = waveform_sr
         self.loader_kwargs = {
             "batch_size": 1,
             "shuffle": False,
@@ -647,7 +672,11 @@ class ParameterDecodingEvaluator:
             Tuple of (clean_responses, augmented_responses, params)
         """
         rc, ra, params, _ = extract_features_param_decoding(
-            self.model, loader, layer=self.layer, num_batches=num_batches
+            self.model,
+            loader,
+            layer=self.layer,
+            num_batches=num_batches,
+            waveform_sr=self.waveform_sr,
         )
         return rc, ra, params
     
@@ -971,20 +1000,40 @@ def main(args):
         eval_max=5,
     )
 
-    # Load model
-    config_path = Path(args.model_config)
-    model_name = config_path.stem
-    is_supervised = args.supervised or any(
-        keyword in model_name for keyword in ["supervised", "audioset"]
-    )
+    waveform_sr: Optional[int] = None
 
-    print(f"Running model: {model_name} (supervised={is_supervised})")
+    if args.model_type == "audiomae":
+        print("Loading pretrained AudioMAE (hance-ai/audiomae)")
+        model = AudioMAELayerwiseEncoder(time_pool=args.audiomae_time_pool).cuda().eval()
+        all_layers = list(model.layer_names)
+        model_name = args.model_name or "audiomae_pretrained"
+        waveform_sr = args.input_sample_rate
+        print(f"Running model: {model_name} (AudioMAE, {len(all_layers)} layers)")
+    else:
+        config_path = Path(args.model_config)
+        model_name = config_path.stem
+        is_supervised = args.supervised or any(
+            keyword in model_name for keyword in ["supervised", "audioset"]
+        )
 
-    model, all_layers = load_model(
-        config_path, args.model_ckpt, args.exp_dir, is_supervised
-    )
+        print(f"Running model: {model_name} (supervised={is_supervised})")
 
-    layer = all_layers[args.job_id] if args.job_id > -1 else args.layer
+        model, all_layers = load_model(
+            config_path, args.model_ckpt, args.exp_dir, is_supervised
+        )
+
+    if args.job_id > -1:
+        if args.job_id >= len(all_layers):
+            raise ValueError(
+                f"job_id {args.job_id} out of range; model has {len(all_layers)} layers: "
+                f"{all_layers}"
+            )
+        layer = all_layers[args.job_id]
+    else:
+        layer = args.layer
+        if isinstance(model, AudioMAELayerwiseEncoder):
+            layer = parse_audiomae_layer_str(layer, valid_layers=all_layers)
+
     print(f"Layer: {layer}")
     print(f"Running {args.n_runs} regression runs per augmentation")
 
@@ -994,6 +1043,7 @@ def main(args):
         layer=layer,
         ridge_alpha=args.ridge_alpha,
         num_workers=args.num_workers,
+        waveform_sr=waveform_sr,
     )
     
     results = evaluator.run_evaluation(
@@ -1112,6 +1162,29 @@ if __name__ == "__main__":
         default=Path("parameter_decoding"),
         type=Path,
         help="Directory to save plots and results to",
+    )
+    parser.add_argument(
+        "--model_type",
+        default="from_config",
+        choices=["from_config", "audiomae"],
+        help="from_config: YAML + checkpoint (default); audiomae: pretrained AudioMAE encoder",
+    )
+    parser.add_argument(
+        "--audiomae_time_pool",
+        action="store_true",
+        help="Average over time dimension in AudioMAE representations (smaller vectors)",
+    )
+    parser.add_argument(
+        "--input_sample_rate",
+        default=SAMPLE_RATE,
+        type=int,
+        help="Waveform sample rate for JSIN audio when using AudioMAE (default: JSIN 20 kHz)",
+    )
+    parser.add_argument(
+        "--model_name",
+        default=None,
+        type=str,
+        help="Output subdirectory name when --model_type audiomae (default: audiomae_pretrained)",
     )
     args = parser.parse_args()
     main(args)

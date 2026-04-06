@@ -13,7 +13,7 @@ Reference:
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -31,6 +31,52 @@ AUDIOMAE_EXPECTED_FRAMES = 1024
 
 AUDIOMAE_MEAN = -4.2677393
 AUDIOMAE_STD = 4.5689974
+
+
+def audiomae_layer_names_list(n_blocks: int = AUDIOMAE_N_BLOCKS) -> List[str]:
+    """Canonical ordered layer names: ``block_0`` … ``block_{n-1}``, then ``norm``."""
+    return [f"block_{i}" for i in range(n_blocks)] + ["norm"]
+
+
+def validate_audiomae_layer(layer: str, n_blocks: int = AUDIOMAE_N_BLOCKS) -> str:
+    """Return ``layer`` if it is a valid AudioMAE hook / norm name; else raise."""
+    names = audiomae_layer_names_list(n_blocks)
+    if layer not in names:
+        raise ValueError(
+            f"Invalid AudioMAE layer {layer!r}. Expected one of: {', '.join(names)}"
+        )
+    return layer
+
+
+def audiomae_layer_from_slurm_index(
+    task_id: int,
+    n_blocks: int = AUDIOMAE_N_BLOCKS,
+) -> str:
+    """Map SLURM array task id to layer name (same order as ``eval_audiomae_*.sh``)."""
+    names = audiomae_layer_names_list(n_blocks)
+    if task_id < 0 or task_id >= len(names):
+        raise ValueError(
+            f"job_id / array index {task_id} out of range [0, {len(names) - 1}] "
+            f"for AudioMAE ({len(names)} layers)."
+        )
+    return names[task_id]
+
+
+def parse_audiomae_layer_str(
+    layer_str: str,
+    *,
+    valid_layers: Optional[Sequence[str]] = None,
+    n_blocks: int = AUDIOMAE_N_BLOCKS,
+) -> str:
+    """Normalize and validate a user-provided layer string (e.g. from CLI)."""
+    s = layer_str.strip()
+    if valid_layers is not None:
+        if s not in valid_layers:
+            raise ValueError(
+                f"Invalid AudioMAE layer {s!r}. Expected one of: {list(valid_layers)}"
+            )
+        return s
+    return validate_audiomae_layer(s, n_blocks=n_blocks)
 
 
 def preprocess_waveform(

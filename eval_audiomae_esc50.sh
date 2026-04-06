@@ -5,10 +5,10 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --gpus=1
 #SBATCH --mem=200Gb
-#SBATCH --time=5:00:00
+#SBATCH --time=8:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-12
+#SBATCH --array=12
 
 mamba activate cochdnn_ssl_pl
 

@@ -1,26 +1,21 @@
 """
-Speech Commands linear probe for the pretrained AudioMAE encoder.
+Lightning module for training linear probes on frozen AudioMAE features for
+Speech Commands 30-class word recognition.
 
-Mirrors eval_speech_commands_transfer.py but uses AudioMAE (hance-ai/audiomae)
-with activation extraction from a specified ViT block. Trains a linear
-classifier on frozen, time-pooled features for 30-class word recognition.
+Loads the pretrained AudioMAE (hance-ai/audiomae) ViT-Base encoder, hooks a
+specified ViT block (or uses the final norm output), time-pools the 2D patch
+activations, and trains a linear (or MLP) classifier.
 """
 
 from __future__ import annotations
 
-import os
-import pickle
-import pathlib
-from argparse import ArgumentParser, BooleanOptionalAction
 from typing import Union
 
-import numpy as np
 import torch
 import torch.nn as nn
 import lightning as L
 from datasets import load_dataset
 from torchmetrics.classification import Accuracy
-from torchaudio.functional import resample
 
 from audiomae_encoder_utils import (
     AUDIOMAE_DIM,
@@ -30,10 +25,6 @@ from audiomae_encoder_utils import (
     preprocess_waveform,
 )
 from audio_ssl.misc import LARS, CosineWarmupScheduler
-
-torch.set_float32_matmul_precision("medium")
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
 
 NUM_CLASSES = 30  # speech_commands v0.01
 
@@ -79,7 +70,7 @@ class AudioMAESpeechCommandsClassifier(L.LightningModule):
 
         self.encoder_layer_idx = config["encoder_layer"]
         self.n_blocks = len(self.audiomae_encoder.blocks)
-        self.use_norm = self.encoder_layer_idx == self.n_blocks  # last = norm
+        self.use_norm = self.encoder_layer_idx >= self.n_blocks
 
         self.encoder_activations = {}
         if not self.use_norm:
@@ -217,17 +208,14 @@ class AudioMAESpeechCommandsClassifier(L.LightningModule):
             return [self.optimizer], [{"scheduler": scheduler, "interval": "step"}]
         return [self.optimizer]
 
-    # ------------------------------------------------------------------
-    # Data
-    # ------------------------------------------------------------------
     def collate_fn(self, batch):
         mels, labels = [], []
         for eg in batch:
             wav = torch.from_numpy(eg["audio"]["array"]).float()
             wav = self.crop_or_pad(wav)
-            mels.append(wav.unsqueeze(0))  # (1, T)
+            mels.append(wav.unsqueeze(0))
             labels.append(eg["label"])
-        waveforms = torch.stack(mels)  # (B, 1, T)
+        waveforms = torch.stack(mels)
         mel = preprocess_waveform(waveforms.squeeze(1), sr=AUDIOMAE_SR)
         return mel, torch.tensor(labels)
 
@@ -280,127 +268,3 @@ class AudioMAESpeechCommandsClassifier(L.LightningModule):
         if isinstance(num_warmup_steps, float):
             return int(num_warmup_steps * num_training_steps)
         return num_warmup_steps
-
-
-# -----------------------------------------------------------------------
-# CLI
-# -----------------------------------------------------------------------
-
-def cli_main(args):
-    L.seed_everything(args.random_seed)
-
-    layer_idx = args.layer_idx
-    layer_name = f"block_{layer_idx}" if layer_idx < 12 else "norm"
-
-    config = {
-        "encoder_layer": layer_idx,
-        "time_average": True,
-        "optimizer": args.optimizer,
-        "lr": args.lr,
-        "lr_schedule": args.lr_scheduler,
-        "batch_size": args.batch_size,
-        "num_workers": args.num_workers,
-        "num_gpus": args.gpus,
-        "classifier_hidden_dims": [args.mlp_dim] if args.w_mlp else None,
-    }
-
-    module = AudioMAESpeechCommandsClassifier(config=config)
-
-    ckpt_dir = pathlib.Path(args.model_ckpt_dir) / f"audiomae/speech_commands/{layer_name}"
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
-
-    existing_ckpts = sorted(ckpt_dir.rglob("*.ckpt"), key=os.path.getctime)
-    if existing_ckpts and args.use_classifier_ckpt:
-        ckpt = torch.load(str(existing_ckpts[-1]), weights_only=False)
-        module.load_state_dict(ckpt["state_dict"])
-        print(f"Loaded classifier from {existing_ckpts[-1]}")
-
-    from lightning.pytorch.callbacks import ModelCheckpoint
-
-    callbacks = [
-        ModelCheckpoint(
-            ckpt_dir,
-            monitor="val_acc",
-            mode="max",
-            save_top_k=1,
-            save_weights_only=True,
-            verbose=True,
-        )
-    ]
-
-    from pytorch_lightning.loggers import WandbLogger
-
-    wandb_logger = WandbLogger(
-        save_dir=str(ckpt_dir),
-        name=f"audiomae_speech_commands_{layer_name}",
-        group="audiomae_speech_commands",
-        project="cochdnn",
-    )
-
-    trainer = L.Trainer(
-        precision="32",
-        default_root_dir=str(ckpt_dir),
-        max_epochs=args.train_epochs,
-        devices=args.gpus,
-        accelerator="gpu",
-        strategy="ddp" if args.gpus > 1 else "auto",
-        gradient_clip_val=1,
-        logger=wandb_logger,
-        callbacks=callbacks,
-    )
-
-    if not args.eval_only:
-        trainer.fit(module)
-
-    print("Running test inference")
-    outputs = trainer.predict(module, module.test_dataloader(), return_predictions=True)
-
-    top1_scores = [r["top1"].item() for r in outputs]
-    top5_scores = [r["top5"].item() for r in outputs]
-
-    def bootstrap_sem(scores, n=1000):
-        mean = np.mean(scores)
-        boots = [np.mean(np.random.choice(scores, size=len(scores))) for _ in range(n)]
-        return mean, np.std(boots)
-
-    top1_mean, top1_sem = bootstrap_sem(top1_scores)
-    top5_mean, top5_sem = bootstrap_sem(top5_scores)
-
-    output_dict = {
-        "word_top1_mean": top1_mean,
-        "word_top1_sem": top1_sem,
-        "word_top5_mean": top5_mean,
-        "word_top5_sem": top5_sem,
-        "layer": layer_name,
-    }
-    print(output_dict)
-
-    results_dir = pathlib.Path(args.results_dir) / "linear_eval_speech_commands"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    mlp_str = f"_w_mlp_{args.mlp_dim}" if args.w_mlp else ""
-    fname = results_dir / f"audiomae_{layer_name}_{args.optimizer}_{args.lr}{mlp_str}.pkl"
-    with open(fname, "wb") as f:
-        pickle.dump(output_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f"Results saved to {fname}")
-
-
-if __name__ == "__main__":
-    parser = ArgumentParser()
-    parser.add_argument("--layer_idx", type=int, default=11,
-                        help="Layer index (0-11 for blocks, 12 for norm).")
-    parser.add_argument("--results_dir", default="eval_jsin_results", type=str)
-    parser.add_argument("--model_ckpt_dir", default="model_checkpoints", type=str)
-    parser.add_argument("--gpus", default=1, type=int)
-    parser.add_argument("--batch_size", default=256, type=int)
-    parser.add_argument("--num_workers", default=4, type=int)
-    parser.add_argument("--random_seed", default=0, type=int)
-    parser.add_argument("--optimizer", default="AdamW", type=str)
-    parser.add_argument("--lr", default=0.001, type=float)
-    parser.add_argument("--train_epochs", default=5, type=int)
-    parser.add_argument("--w_mlp", action=BooleanOptionalAction)
-    parser.add_argument("--mlp_dim", default=512, type=int)
-    parser.add_argument("--lr_scheduler", action=BooleanOptionalAction)
-    parser.add_argument("--eval_only", action=BooleanOptionalAction)
-    parser.add_argument("--use_classifier_ckpt", action=BooleanOptionalAction)
-    args = parser.parse_args()
-    cli_main(args)

@@ -25,11 +25,40 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
+def _parse_audiomae_layer_str(layer_str: str) -> tuple:
+    """Parse a layer_str into (encoder_layer_idx, layer_name) for AudioMAE."""
+    if layer_str == "norm":
+        return 12, "norm"
+    if layer_str.startswith("block_"):
+        idx = int(layer_str.split("_")[-1])
+        return idx, layer_str
+    if layer_str.isdigit():
+        idx = int(layer_str)
+        return idx, f"block_{idx}" if idx < 12 else "norm"
+    raise ValueError(
+        f"Invalid AudioMAE layer_str '{layer_str}'. "
+        "Use 'block_N' (0-11), 'norm', or an integer."
+    )
+
+
 def cli_main(args):
     L.seed_everything(args.random_seed)
     
     # Load config
-    if args.config_path != "":
+    if args.encoder_type == 'audiomae':
+        audiomae_layer_idx, audiomae_layer_name = _parse_audiomae_layer_str(args.layer_str)
+        config = {
+            'model': {
+                'arch_name': 'audiomae_pretrained',
+                'arch_kwargs': {
+                    'encoder_layer': audiomae_layer_idx,
+                    'time_average': True,
+                },
+            },
+            'hparas': {},
+        }
+        config_path = pathlib.Path('audiomae_pretrained')
+    elif args.config_path != "":
         config_path = pathlib.Path(args.config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -40,16 +69,17 @@ def cli_main(args):
             config_path = pathlib.Path(config_dict[args.array_ix])
             config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     else:
-        raise ValueError("Must provide either config_path or config_list_path")
+        raise ValueError("Must provide either config_path, config_list_path, or --encoder_type audiomae")
 
+    use_audiomae = args.encoder_type == 'audiomae'
     use_whisper = args.encoder_type == 'whisper'
-    if not use_whisper and 'whisper' in str(config_path).lower():
+    if not use_whisper and not use_audiomae and 'whisper' in str(config_path).lower():
         use_whisper = True
     
     print(f"Evaluating config: {config_path}")
     
     # Check if this is BYOL-A (pre-trained, no checkpoint needed)
-    use_byola = args.encoder_type == 'byola' or 'byol-a' in str(config_path).lower() or 'byola' in str(config_path).lower()
+    use_byola = not use_audiomae and (args.encoder_type == 'byola' or 'byol-a' in str(config_path).lower() or 'byola' in str(config_path).lower())
     
     # Infer supervised backbone from config path if not explicitly set
     supervised_backbone = args.supervised_backbone
@@ -78,7 +108,9 @@ def cli_main(args):
         config['model'] = {}
     
     # Handle encoder configuration
-    if use_whisper:
+    if use_audiomae:
+        pass  # config already built above
+    elif use_whisper:
         if 'arch_kwargs' not in config['model']:
             config['model']['arch_kwargs'] = {}
         if 'whisper_model' not in config['model']:
@@ -132,8 +164,8 @@ def cli_main(args):
         config['model']['arch_kwargs']['time_average'] = args.time_avg_rep
     config['hparas']['lr_schedule'] = args.lr_scheduler
     
-    # BYOL-A uses 16kHz, Whisper uses 16kHz, others use 20kHz
-    target_sample_rate = 16000 if (use_whisper or use_byola) else 20000
+    # AudioMAE, BYOL-A, and Whisper use 16kHz; SSL models use 20kHz
+    target_sample_rate = 16000 if (use_audiomae or use_whisper or use_byola) else 20000
 
     # Get NSynth dataset to determine num_classes
     train_dataset = NsynthDataset(
@@ -165,7 +197,7 @@ def cli_main(args):
     
     # Build modifier string for checkpoint naming (same pattern as speech_commands)
     time_avg_str = ""
-    if not use_whisper and not args.time_avg_rep:
+    if not use_whisper and not use_audiomae and not args.time_avg_rep:
         time_avg_str = "full_rep_"
     
     scheduler_str = ""
@@ -182,7 +214,10 @@ def cli_main(args):
     
     # Get checkpoint for encoder if needed (same pattern as speech_commands)
     checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
-    if use_whisper:
+    if use_audiomae:
+        ckpt_path = None
+        ckpt_modifier = ''
+    elif use_whisper:
         ckpt_path = None
         ckpt_modifier = '_whisper'
     elif use_byola:
@@ -200,10 +235,12 @@ def cli_main(args):
             ckpt_path = args.ckpt_path
             ckpt_modifier = '_from_best_val_ckpt'
     
-    layer_component = (
-        f"whisper_layer_{config['model']['arch_kwargs']['encoder_layer']}"
-        if use_whisper else args.layer_str.replace('.', '_')
-    )
+    if use_audiomae:
+        layer_component = audiomae_layer_name
+    elif use_whisper:
+        layer_component = f"whisper_layer_{config['model']['arch_kwargs']['encoder_layer']}"
+    else:
+        layer_component = args.layer_str.replace('.', '_')
     str_modifier = (
         f"{config['hparas']['optimizer']}_{layer_component}_{time_avg_str}"
         f"{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}{dropout_str}"
@@ -232,6 +269,7 @@ def cli_main(args):
         sample_rate=target_sample_rate,
         use_whisper=use_whisper,
         use_byola=use_byola,
+        use_audiomae=use_audiomae,
     )
     
     # Check if existing classifier checkpoint exists
@@ -530,8 +568,8 @@ if __name__ == "__main__":
     parser.add_argument(
         '--encoder_type',
         default='ssl',
-        choices=['ssl', 'whisper'],
-        help='Encoder to use for feature extraction. Set to "whisper" to use a frozen Whisper encoder.'
+        choices=['ssl', 'whisper', 'audiomae', 'byola'],
+        help='Encoder to use for feature extraction. Set to "whisper", "audiomae", or "byola" for pretrained encoders.'
     )
     parser.add_argument(
         '--whisper_model',

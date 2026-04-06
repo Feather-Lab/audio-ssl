@@ -18,6 +18,13 @@ import torch.nn.functional as F
 from nsynth_dataset import NsynthDataset
 
 from byola_lightning_module import BYOLAModule
+from audiomae_encoder_utils import (
+    AUDIOMAE_DIM,
+    AUDIOMAE_FREQ_PATCHES,
+    AUDIOMAE_SR,
+    AUDIOMAE_TIME_PATCHES,
+    preprocess_waveform as audiomae_preprocess_waveform,
+)
 
 
 class NSynthLinearEvalModule(L.LightningModule):
@@ -45,6 +52,7 @@ class NSynthLinearEvalModule(L.LightningModule):
         sample_rate: int = 20000,
         use_whisper: bool = False,
         use_byola: bool = False,
+        use_audiomae: bool = False,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -68,8 +76,13 @@ class NSynthLinearEvalModule(L.LightningModule):
             self.config['model']['arch_kwargs'] = {}
         self.use_whisper = use_whisper or bool(self.config['model'].get('whisper_model'))
         self.use_byola = use_byola or bool(self.config['model'].get('byola_arch'))
+        self.use_audiomae = use_audiomae
         
-        if self.use_whisper:
+        if self.use_audiomae:
+            self._init_audiomae_encoder()
+            feature_dim = self.audiomae_feature_dim
+            self.feature_extractor_wrapper = None
+        elif self.use_whisper:
             self._init_whisper_encoder()
             feature_dim = self.classifier_input_dim
             self.feature_extractor_wrapper = None
@@ -140,6 +153,81 @@ class NSynthLinearEvalModule(L.LightningModule):
         # Loss
         self.criterion = nn.CrossEntropyLoss()
     
+    def _init_audiomae_encoder(self):
+        """Initialize frozen AudioMAE encoder with hook on specified layer."""
+        from transformers import AutoModel
+        from transformers.modeling_utils import PreTrainedModel
+
+        _orig_mark = PreTrainedModel.mark_tied_weights_as_initialized
+        def _safe_mark(self_model, loading_info):
+            if not hasattr(self_model, "all_tied_weights_keys"):
+                self_model.all_tied_weights_keys = {}
+            return _orig_mark(self_model, loading_info)
+        PreTrainedModel.mark_tied_weights_as_initialized = _safe_mark
+
+        wrapper = AutoModel.from_pretrained(
+            "hance-ai/audiomae", trust_remote_code=True
+        )
+        self.audiomae_encoder = wrapper.encoder
+        for param in self.audiomae_encoder.parameters():
+            param.requires_grad = False
+        self.audiomae_encoder.eval()
+
+        encoder_layer = self.config['model']['arch_kwargs'].get('encoder_layer', 11)
+        self.audiomae_layer_idx = int(encoder_layer)
+        self.audiomae_n_blocks = len(self.audiomae_encoder.blocks)
+        self.audiomae_use_norm = self.audiomae_layer_idx >= self.audiomae_n_blocks
+
+        self.audiomae_activations = {}
+        if not self.audiomae_use_norm:
+            def hook_fn(_module, _input, output):
+                out = output[0] if isinstance(output, tuple) else output
+                self.audiomae_activations["layer_output"] = out.detach()
+            if self.audiomae_layer_idx < 0 or self.audiomae_layer_idx >= self.audiomae_n_blocks:
+                raise ValueError(
+                    f"AudioMAE encoder_layer {self.audiomae_layer_idx} out of range "
+                    f"(0-{self.audiomae_n_blocks - 1})"
+                )
+            self.audiomae_encoder.blocks[self.audiomae_layer_idx].register_forward_hook(hook_fn)
+
+        time_pool = self.config['model']['arch_kwargs'].get('time_average', True)
+        self.audiomae_time_pool = time_pool
+        if time_pool:
+            self.audiomae_feature_dim = AUDIOMAE_DIM * AUDIOMAE_FREQ_PATCHES  # 6144
+        else:
+            self.audiomae_feature_dim = AUDIOMAE_DIM * AUDIOMAE_FREQ_PATCHES * AUDIOMAE_TIME_PATCHES
+
+    def _extract_audiomae_features(self, x):
+        """Extract features from frozen AudioMAE encoder."""
+        if x.dim() == 3:
+            x = x.squeeze(1)
+
+        mel = audiomae_preprocess_waveform(x, sr=self.sample_rate).to(x.device)
+
+        with torch.no_grad():
+            self.audiomae_activations.clear()
+            full_out = self.audiomae_encoder.forward_features(mel)
+
+            if self.audiomae_use_norm:
+                tokens = full_out
+            else:
+                tokens = self.audiomae_activations["layer_output"]
+
+            tokens = tokens[:, 1:, :]  # remove CLS
+            feats = tokens.reshape(
+                tokens.shape[0],
+                AUDIOMAE_FREQ_PATCHES,
+                AUDIOMAE_TIME_PATCHES,
+                AUDIOMAE_DIM,
+            ).permute(0, 3, 1, 2)  # (B, D, freq, time)
+
+            if self.audiomae_time_pool:
+                feats = feats.mean(dim=-1)
+
+            activations = feats.flatten(start_dim=1).detach()
+            self.audiomae_activations.clear()
+        return activations
+
     def _init_whisper_encoder(self):
         """Initialize Whisper encoder components."""
         whisper_model_name = self.config['model'].get('whisper_model', 'large-v3-turbo')
@@ -354,7 +442,9 @@ class NSynthLinearEvalModule(L.LightningModule):
         Returns:
             logits: Classification logits of shape (batch, num_classes)
         """
-        if self.use_whisper:
+        if self.use_audiomae:
+            activations = self._extract_audiomae_features(x)
+        elif self.use_whisper:
             activations = self._extract_whisper_features(x)
         else:
             activations = self._extract_ssl_features(x)
