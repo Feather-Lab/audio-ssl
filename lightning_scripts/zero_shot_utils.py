@@ -149,6 +149,44 @@ def batched_pearson_corrcoef(x, y, dim=-1):
 
 
 
+def embedding_triplet_metrics(
+    z_anchor: torch.Tensor,
+    z_pos: torch.Tensor,
+    z_neg: torch.Tensor,
+) -> Dict[str, float]:
+    """Compute distance metrics on pre-computed (anchor, positive, negative) embeddings.
+
+    Each input should be shaped (B, D).  Returns L2, squared-L2, cosine,
+    and Pearson-correlation distances plus binary judgements.
+    """
+    pos_l2 = torch.norm(z_anchor - z_pos, p=2).item()
+    neg_l2 = torch.norm(z_anchor - z_neg, p=2).item()
+    pos_l2_sq = pos_l2**2
+    neg_l2_sq = neg_l2**2
+
+    pos_cos = F.cosine_similarity(z_anchor, z_pos).item()
+    neg_cos = F.cosine_similarity(z_anchor, z_neg).item()
+
+    pos_r = batched_pearson_corrcoef(z_anchor, z_pos, dim=-1).item()
+    neg_r = batched_pearson_corrcoef(z_anchor, z_neg, dim=-1).item()
+
+    return {
+        "pos_l2": pos_l2,
+        "neg_l2": neg_l2,
+        "pos_l2_sq": pos_l2_sq,
+        "neg_l2_sq": neg_l2_sq,
+        "l2_judgement": int(pos_l2 < neg_l2),
+        "sqr_l2_judgement": int(pos_l2_sq < neg_l2_sq),
+        "judgement_pos_lt_neg": int(pos_l2 < neg_l2),
+        "pos_cos": pos_cos,
+        "neg_cos": neg_cos,
+        "cos_judgement": int(pos_cos > neg_cos),
+        "pos_r": pos_r,
+        "neg_r": neg_r,
+        "r_judgement": int(pos_r > neg_r),
+    }
+
+
 def distance_metrics_on_triplet(
     model: torch.nn.Module,
     clips: Dict[str, torch.Tensor],
@@ -160,9 +198,7 @@ def distance_metrics_on_triplet(
     """
     Compute embedding-space distance metrics for (anchor, positive, negative).
 
-    Returns dict with: pos_l2, neg_l2, pos_l2_sq, neg_l2_sq, l2_judgement, sqr_l2_judgement,
-    and judgement_pos_lt_neg (alias for l2_judgement for nsynth notebook).
-    If include_cosine=True, also returns pos_cos, neg_cos, cos_judgement.
+    Encodes clips with *model*, then delegates to ``embedding_triplet_metrics``.
     """
     if device is None:
         device = next(model.parameters()).device
@@ -181,35 +217,7 @@ def distance_metrics_on_triplet(
     z_pos = encode_audio(model, positive_batch)
     z_neg = encode_audio(model, negative_batch)
 
-    pos_l2 = torch.norm(z_anchor - z_pos, p=2).item()
-    neg_l2 = torch.norm(z_anchor - z_neg, p=2).item()
-    pos_l2_sq = pos_l2**2
-    neg_l2_sq = neg_l2**2
-    
-    out: Dict[str, float] = {
-        "pos_l2": pos_l2,
-        "neg_l2": neg_l2,
-        "pos_l2_sq": pos_l2_sq,
-        "neg_l2_sq": neg_l2_sq,
-        "l2_judgement": int(pos_l2 < neg_l2),
-        "sqr_l2_judgement": int(pos_l2_sq < neg_l2_sq),
-        "judgement_pos_lt_neg": int(pos_l2 < neg_l2),
-    }
-
-    # include cosine sim
-    pos_cos = F.cosine_similarity(z_anchor, z_pos).item()
-    neg_cos = F.cosine_similarity(z_anchor, z_neg).item()
-    out["pos_cos"] = pos_cos
-    out["neg_cos"] = neg_cos
-    out["cos_judgement"] = int(pos_cos > neg_cos)
-
-    # include correlation 
-    pos_r = batched_pearson_corrcoef(z_anchor, z_pos, dim=-1).item()
-    neg_r = batched_pearson_corrcoef(z_anchor, z_neg, dim=-1).item()
-    out["pos_r"] = pos_r
-    out["neg_r"] = neg_r
-    out["r_judgement"] = int(pos_r > neg_r) 
-    return out
+    return embedding_triplet_metrics(z_anchor, z_pos, z_neg)
 
 
 def run_triplet_evaluation(
