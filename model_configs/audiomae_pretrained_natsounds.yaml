@@ -1,0 +1,8 @@
+val_metric: 'val_acc' # unused for feature extraction
+val_metric_mode: 'max'
+
+model:
+  arch_name: audiomae_pretrained
+  use_audiomae_pretrained: true
+  arch_kwargs:
+    encoder_layer: 11

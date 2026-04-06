@@ -56,6 +56,13 @@ import yaml
 import torch
 import whisper
 from lightning_scripts.byola_lightning_module import BYOLAModule
+from lightning_scripts.audiomae_encoder_utils import (
+    AUDIOMAE_SR,
+    AUDIOMAE_DIM,
+    AUDIOMAE_FREQ_PATCHES,
+    AUDIOMAE_TIME_PATCHES,
+    preprocess_waveform as audiomae_preprocess_waveform,
+)
 from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_scripts.lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 import robustness.audio_functions.audio_transforms as at
@@ -93,9 +100,10 @@ def cli_main(args):
     print(f"Features from config: {config_path}")
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     use_pretrained_whisper = bool(config.get('model', {}).get('use_whisper_pretrained', False))
+    use_pretrained_audiomae = bool(config.get('model', {}).get('use_audiomae_pretrained', False))
 
     ############Get model checkpoint############
-    if use_pretrained_whisper:
+    if use_pretrained_whisper or use_pretrained_audiomae:
         ckpt_path = ''
     elif args.ckpt_path == "" and 'byol' not in str(config_path):
         checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
@@ -128,6 +136,36 @@ def cli_main(args):
         for idx, block in enumerate(whisper_encoder.blocks):
             block.register_forward_hook(_make_whisper_hook(f"encoder_block_{idx}"))
         model = whisper_encoder
+    elif use_pretrained_audiomae:
+        from transformers import AutoModel
+        from transformers.modeling_utils import PreTrainedModel
+
+        _orig_mark = PreTrainedModel.mark_tied_weights_as_initialized
+        def _safe_mark(self, loading_info):
+            if not hasattr(self, "all_tied_weights_keys"):
+                self.all_tied_weights_keys = {}
+            return _orig_mark(self, loading_info)
+        PreTrainedModel.mark_tied_weights_as_initialized = _safe_mark
+
+        audiomae_wrapper = AutoModel.from_pretrained(
+            "hance-ai/audiomae", trust_remote_code=True
+        )
+        audiomae_encoder = audiomae_wrapper.encoder.eval().cuda()
+        for param in audiomae_encoder.parameters():
+            param.requires_grad = False
+        num_layers = len(audiomae_encoder.blocks)
+        all_layers = [f"block_{idx}" for idx in range(num_layers)] + ["norm"]
+        audiomae_layer_outputs = {}
+
+        def _make_audiomae_hook(layer_key):
+            def hook_fn(_module, _inputs, outputs):
+                layer_out = outputs[0] if isinstance(outputs, tuple) else outputs
+                audiomae_layer_outputs[layer_key] = layer_out
+            return hook_fn
+
+        for idx, block in enumerate(audiomae_encoder.blocks):
+            block.register_forward_hook(_make_audiomae_hook(f"block_{idx}"))
+        model = audiomae_encoder
     elif "supervised" in str(config_path):
         module = LitWordAudioSetModelMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         model = module.model.eval().cuda()
@@ -138,7 +176,7 @@ def cli_main(args):
     else:
         module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         model = module.model.eval().cuda()
-    if not use_pretrained_whisper:
+    if not use_pretrained_whisper and not use_pretrained_audiomae:
         all_layers = module.metamer_layers
 
     ##############Begin Define Parameters#################
@@ -146,6 +184,8 @@ def cli_main(args):
     model_name_modfier = f"_{args.dir_name_modifier}" if args.dir_name_modifier != '' else ''
     if use_pretrained_whisper:
         save_features_dir = save_features_dir / f"whisper_{config.get('model', {}).get('whisper_model', 'pretrained')}{model_name_modfier}"
+    elif use_pretrained_audiomae:
+        save_features_dir = save_features_dir / f"audiomae{model_name_modfier}"
     elif 'byol' in str(config_path):
         save_features_dir = save_features_dir / f"byol-a{model_name_modfier}"
     else:
@@ -159,7 +199,7 @@ def cli_main(args):
 
     wavs_location = os.path.join(fMRI_DATA_PATH, '165_natural_sounds')
 
-    SR=16000 if ('byol' in str(config_path) or use_pretrained_whisper) else 20000 # Match with the networks we are building/training
+    SR=16000 if ('byol' in str(config_path) or use_pretrained_whisper or use_pretrained_audiomae) else 20000 # Match with the networks we are building/training
     MEASURE_DUR=2
     wav_array = np.empty([165, SR*MEASURE_DUR])
     for wav_idx, wav_data in enumerate(sound_list):
@@ -196,6 +236,20 @@ def cli_main(args):
                 encoder_out = model(mel)
             layer_returns = dict(whisper_layer_outputs)
             layer_returns["ln_post"] = encoder_out
+        elif use_pretrained_audiomae:
+            sound = torch.from_numpy(wav_array[sound_idx, :]).float().unsqueeze(0)  # (1, T)
+            mel = audiomae_preprocess_waveform(sound, sr=AUDIOMAE_SR).cuda()  # (1, 1, 1024, 128)
+            audiomae_layer_outputs.clear()
+            with torch.no_grad():
+                encoder_out = model.forward_features(mel)  # (1, 513, 768)
+            layer_returns = dict(audiomae_layer_outputs)
+            layer_returns["norm"] = encoder_out
+            # Remove CLS token and reshape to (1, freq, time, D) for each layer
+            for lk in layer_returns:
+                tokens = layer_returns[lk][:, 1:, :]  # (1, 512, 768)
+                layer_returns[lk] = tokens.reshape(
+                    1, AUDIOMAE_FREQ_PATCHES, AUDIOMAE_TIME_PATCHES, AUDIOMAE_DIM
+                ).permute(0, 3, 1, 2)  # (1, D, freq, time) — 4D like NCHW
         else:
             sound, _ = transforms(wav_array[sound_idx,:], None)
             sound = sound.float().cuda()
