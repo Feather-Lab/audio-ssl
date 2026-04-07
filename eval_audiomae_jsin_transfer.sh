@@ -29,7 +29,7 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py \
     --batch_size 512 \
     --optimizer "AdamW" --lr 0.001 \
     --task 'word' \
-    --train_epochs 6 \
+    --train_epochs 12 \
     --gpus $num_gpus \
     --checkpoint_every_n_steps 2000 \
-    --no-with_noise --no-eval_only --no-lr_scheduler --no-use_classifier_ckpt --no-with_dropout
+    --no-with_noise --no-eval_only --no-lr_scheduler --use_classifier_ckpt --with_dropout

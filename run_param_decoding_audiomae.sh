@@ -22,7 +22,7 @@ LAYER=${LAYERS[$SLURM_ARRAY_TASK_ID]}
 
 echo "Job array ID: $SLURM_ARRAY_TASK_ID  Layer: $LAYER"
 
-srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py \
+srun -K python3 -u lightning_scripts/run_param_decoding_single_model_torch.py \
     --model_type audiomae \
     --input_sample_rate 20000 \
     --num_workers "$SLURM_JOB_CPUS_PER_NODE" \
@@ -31,4 +31,5 @@ srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py \
     --num_eval 10 \
     --num_train 50 \
     --job_id "$SLURM_ARRAY_TASK_ID" \
-    --ridge_alpha 0.5
+    --ridge_alpha 0.5 \
+    --regression_device cuda
