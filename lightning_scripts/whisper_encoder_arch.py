@@ -1,7 +1,11 @@
-import torch 
-import torch.nn as nn 
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
+import torchaudio.functional as taF
+import whisper
 import whisper.model as whisper_models
+
+WHISPER_SR = 16_000
 
 def get_whisper_encoder_layer_map(n_layer: int) -> dict:
     layer_map = {
@@ -40,6 +44,65 @@ def get_whisper_encoder_layer_sizes(encoder_kwargs: dict, time_average: bool) ->
         layer_sizes[f"encoder_block_{idx}"] = base_time_size
         layer_sizes[f"block_{idx}"] = base_time_size
     return layer_sizes
+
+
+def whisper_layer_names_list(n_blocks: int) -> list[str]:
+    names = [f"encoder_block_{idx}" for idx in range(n_blocks)]
+    names.append("ln_post")
+    return names
+
+
+def parse_whisper_layer_str(layer: str, valid_layers: list[str]) -> str:
+    if layer in valid_layers:
+        return layer
+    msg = f"Invalid Whisper layer '{layer}'. Valid layers: {valid_layers}"
+    raise ValueError(msg)
+
+
+class WhisperLayerwiseEncoder(nn.Module):
+    """Pretrained Whisper encoder wrapper with per-layer activations."""
+
+    def __init__(self, whisper_model_name: str = "large-v3"):
+        super().__init__()
+        model = whisper.load_model(whisper_model_name)
+        self.encoder = model.encoder
+        self.n_mels = model.dims.n_mels
+        self.layer_names = whisper_layer_names_list(len(self.encoder.blocks))
+
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+        self.encoder.eval()
+
+        self._layer_outputs: dict[str, torch.Tensor] = {}
+        for idx, block in enumerate(self.encoder.blocks):
+            block.register_forward_hook(self._make_hook(f"encoder_block_{idx}"))
+
+    def _make_hook(self, name: str):
+        def hook_fn(_module, _inputs, output):
+            out = output[0] if isinstance(output, tuple) else output
+            self._layer_outputs[name] = out
+
+        return hook_fn
+
+    @torch.no_grad()
+    def forward(self, waveform: torch.Tensor, sr: int | None = None) -> dict[str, torch.Tensor]:
+        if waveform.dim() == 3:
+            waveform = waveform.squeeze(1)
+        if sr is not None and sr != WHISPER_SR:
+            waveform = taF.resample(waveform, orig_freq=sr, new_freq=WHISPER_SR)
+
+        waveform = whisper.pad_or_trim(waveform)
+        mel = whisper.log_mel_spectrogram(waveform, n_mels=self.n_mels).to(waveform.device)
+
+        self._layer_outputs.clear()
+        encoder_out = self.encoder(mel)
+
+        embeddings: dict[str, torch.Tensor] = {}
+        for layer_name, layer_act in self._layer_outputs.items():
+            embeddings[layer_name] = layer_act.flatten(start_dim=1)
+        embeddings["ln_post"] = encoder_out.flatten(start_dim=1)
+        self._layer_outputs.clear()
+        return embeddings
 
 
 class TransformerAudioEncoder(nn.Module):

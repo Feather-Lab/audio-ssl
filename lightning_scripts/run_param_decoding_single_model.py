@@ -35,6 +35,10 @@ from lightning_scripts.audiomae_encoder_utils import (
     AudioMAELayerwiseEncoder,
     parse_audiomae_layer_str,
 )
+from lightning_scripts.whisper_encoder_arch import (
+    WhisperLayerwiseEncoder,
+    parse_whisper_layer_str,
+)
 
 # Configure PyTorch
 torch.set_float32_matmul_precision("medium")
@@ -422,6 +426,11 @@ def get_rep_wrapped_model(
     """
     if isinstance(model, AudioMAELayerwiseEncoder):
         sr_use = waveform_sr if waveform_sr is not None else AUDIOMAE_SR
+        embeddings = model(input_tensor, sr=sr_use)
+        rep = embeddings[layer]
+        return rep.flatten(start_dim=1) if rep.dim() > 2 else rep
+    if isinstance(model, WhisperLayerwiseEncoder):
+        sr_use = waveform_sr if waveform_sr is not None else SAMPLE_RATE
         embeddings = model(input_tensor, sr=sr_use)
         rep = embeddings[layer]
         return rep.flatten(start_dim=1) if rep.dim() > 2 else rep
@@ -1009,6 +1018,13 @@ def main(args):
         model_name = args.model_name or "audiomae_pretrained"
         waveform_sr = args.input_sample_rate
         print(f"Running model: {model_name} (AudioMAE, {len(all_layers)} layers)")
+    elif args.model_type == "whisper":
+        print(f"Loading pretrained Whisper ({args.whisper_model})")
+        model = WhisperLayerwiseEncoder(whisper_model_name=args.whisper_model).cuda().eval()
+        all_layers = list(model.layer_names)
+        model_name = args.model_name or f"whisper_pretrained_{args.whisper_model}"
+        waveform_sr = args.input_sample_rate
+        print(f"Running model: {model_name} (Whisper, {len(all_layers)} layers)")
     else:
         config_path = Path(args.model_config)
         model_name = config_path.stem
@@ -1033,6 +1049,8 @@ def main(args):
         layer = args.layer
         if isinstance(model, AudioMAELayerwiseEncoder):
             layer = parse_audiomae_layer_str(layer, valid_layers=all_layers)
+        elif isinstance(model, WhisperLayerwiseEncoder):
+            layer = parse_whisper_layer_str(layer, valid_layers=all_layers)
 
     print(f"Layer: {layer}")
     print(f"Running {args.n_runs} regression runs per augmentation")
@@ -1166,8 +1184,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_type",
         default="from_config",
-        choices=["from_config", "audiomae"],
-        help="from_config: YAML + checkpoint (default); audiomae: pretrained AudioMAE encoder",
+        choices=["from_config", "audiomae", "whisper"],
+        help=(
+            "from_config: YAML + checkpoint (default); "
+            "audiomae: pretrained AudioMAE encoder; "
+            "whisper: pretrained Whisper encoder"
+        ),
     )
     parser.add_argument(
         "--audiomae_time_pool",
@@ -1184,7 +1206,16 @@ if __name__ == "__main__":
         "--model_name",
         default=None,
         type=str,
-        help="Output subdirectory name when --model_type audiomae (default: audiomae_pretrained)",
+        help=(
+            "Output subdirectory name for pretrained encoder modes "
+            "(default: audiomae_pretrained or whisper_pretrained_<model>)"
+        ),
+    )
+    parser.add_argument(
+        "--whisper_model",
+        default="large-v3",
+        type=str,
+        help="Pretrained Whisper model name when --model_type whisper",
     )
     args = parser.parse_args()
     main(args)
