@@ -27,7 +27,7 @@ from byol_a.common import *
 from byol_a.augmentations import PrecomputedNorm
 from byol_a.models import AudioNTT2020
 from easydict import EasyDict
-from audiomae_speech_commands_module import AudioMAESpeechCommandsClassifier
+from audiomae_speech_commands_module import AudioMAESpeechCommandsClassifier, WhisperSpeechCommandsClassifier
 
 torch.set_float32_matmul_precision('medium')
 
@@ -576,6 +576,7 @@ def cli_main(args):
     L.seed_everything(args.random_seed)
 
     use_audiomae = getattr(args, 'model_type', '') == 'audiomae'
+    use_whisper_pretrained = getattr(args, 'model_type', '') == 'whisper'
 
     if use_audiomae:
         audiomae_layer_idx, audiomae_layer_name = _parse_audiomae_layer_str(args.layer_str)
@@ -605,6 +606,47 @@ def cli_main(args):
             'num_workers': args.num_workers,
             'num_gpus': args.gpus,
         }
+    elif use_whisper_pretrained:
+        whisper_model_name = getattr(args, 'whisper_model', 'large-v3')
+        import whisper as _whisper
+        _tmp = _whisper.load_model(whisper_model_name)
+        _n_blocks = len(_tmp.encoder.blocks)
+        del _tmp
+        from whisper_encoder_arch import whisper_layer_names_list
+        layer_names = whisper_layer_names_list(_n_blocks)
+        layer_str = args.layer_str
+        if layer_str.isdigit():
+            layer_str = f"encoder_block_{layer_str}"
+        if layer_str not in layer_names:
+            raise ValueError(f"Invalid whisper layer '{layer_str}'. Valid: {layer_names}")
+        whisper_encoder_layer = int(layer_str.split("_")[-1]) if layer_str.startswith("encoder_block_") else _n_blocks
+        whisper_layer_name = layer_str
+
+        config_path = pathlib.Path(f'whisper_{whisper_model_name}')
+        whisper_config = {
+            "whisper_model": whisper_model_name,
+            "encoder_layer": whisper_encoder_layer,
+            "optimizer": args.optimizer,
+            "lr": args.lr,
+            "lr_schedule": bool(args.lr_scheduler),
+            "batch_size": args.batch_size,
+            "num_workers": args.num_workers,
+            "num_gpus": args.gpus,
+            "classifier_hidden_dims": [args.mlp_dim] if args.w_mlp else None,
+        }
+
+        config = {
+            'model': {'arch_kwargs': {}},
+            'hparas': {
+                'batch_size': args.batch_size,
+                'optimizer': args.optimizer,
+                'lr': args.lr,
+                'epochs': 5,
+            },
+            'data': {'eval_max': 3},
+            'num_workers': args.num_workers,
+            'num_gpus': args.gpus,
+        }
     else:
         if args.config_path != "":
             config_path = pathlib.Path(args.config_path)
@@ -613,7 +655,7 @@ def cli_main(args):
                 config_dict = pickle.load(f)
                 config_path = pathlib.Path(config_dict[args.array_ix])
         else:
-            raise ValueError("Must provide either config_path, config_list_path, or --model_type audiomae")
+            raise ValueError("Must provide either config_path, config_list_path, or --model_type audiomae/whisper")
 
         print(f"Evaluating config: {config_path}")
         config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
@@ -665,8 +707,8 @@ def cli_main(args):
 
     ckpt_path = None
     ckpt_modifier = ''
-    if use_audiomae:
-        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / "audiomae/checkpoints"
+    if use_audiomae or use_whisper_pretrained:
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
     else:
         checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
         if args.ckpt_path == "":
@@ -678,12 +720,19 @@ def cli_main(args):
             ckpt_path = args.ckpt_path
             ckpt_modifier = '_from_best_val_ckpt'
 
-    layer_component = audiomae_layer_name if use_audiomae else args.layer_str
+    if use_audiomae:
+        layer_component = audiomae_layer_name
+    elif use_whisper_pretrained:
+        layer_component = whisper_layer_name
+    else:
+        layer_component = args.layer_str
     str_modifier = f"{config['hparas']['optimizer']}_{layer_component}_{time_avg_str}{config['hparas']['lr']}{scheduler_str}{mlp_str}{ckpt_modifier}"
     classifier_checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/speech_commands_linear_classifier_checkpoints/{str_modifier}"
 
     if use_audiomae:
         module = AudioMAESpeechCommandsClassifier(config=audiomae_config)
+    elif use_whisper_pretrained:
+        module = WhisperSpeechCommandsClassifier(config=whisper_config)
     elif use_byola:
         module = BYOLAClassifier(config=config)
     else:
@@ -843,7 +892,8 @@ if __name__ == "__main__":
     parser.add_argument('--time_avg_rep', action=BooleanOptionalAction, help='Time average the model rep fed to classifer?')
     parser.add_argument('--supervised_backbone', action=BooleanOptionalAction, help='Using supervised backbone?')
     parser.add_argument('--train_epochs', default=5, type=int, help='Number of training epochs.')
-    parser.add_argument('--model_type', default='', type=str, help='Model type: "audiomae" for pretrained AudioMAE (no config file needed).')
+    parser.add_argument('--model_type', default='', type=str, help='Model type: "audiomae" or "whisper" for pretrained encoders (no config file needed).')
+    parser.add_argument('--whisper_model', default='large-v3', type=str, help='Whisper model name for --model_type whisper (e.g. large-v3).')
 
     args = parser.parse_args()
 

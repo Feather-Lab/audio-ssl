@@ -444,6 +444,20 @@ AUGMENTATION_CONFIGS = [
 ]
 
 
+def _estimate_whisper_valid_tokens(
+    input_tensor: torch.Tensor,
+    waveform_sr: int,
+    max_tokens: int = 1500,
+) -> int:
+    """Estimate number of non-padded Whisper encoder tokens from input duration."""
+    n_samples = int(input_tensor.shape[-1])
+    # Whisper encoder context is 30 s -> 1500 tokens, i.e. 50 tokens/s.
+    token_rate_hz = max_tokens / 30.0
+    duration_seconds = n_samples / float(waveform_sr)
+    n_tokens = int(round(duration_seconds * token_rate_hz))
+    return max(1, min(max_tokens, n_tokens))
+
+
 def get_rep_wrapped_model(
     model: torch.nn.Module,
     input_tensor: torch.Tensor,
@@ -469,8 +483,15 @@ def get_rep_wrapped_model(
         return rep.flatten(start_dim=1) if rep.dim() > 2 else rep
     if isinstance(model, WhisperLayerwiseEncoder):
         sr_use = waveform_sr if waveform_sr is not None else SAMPLE_RATE
-        embeddings = model(input_tensor, sr=sr_use)
+        embeddings = model(input_tensor, sr=sr_use, flatten_activations=False)
         rep = embeddings[layer]
+        # Whisper pads/trims to 30 s internally; keep only valid, unpadded tokens.
+        if rep.dim() != 3:
+            raise ValueError(
+                f"Expected unflattened Whisper activations [B, T, D], got {rep.shape}"
+            )
+        valid_tokens = _estimate_whisper_valid_tokens(input_tensor, waveform_sr=sr_use)
+        rep = rep[:, :valid_tokens, :]
         return rep.flatten(start_dim=1) if rep.dim() > 2 else rep
 
     if layer == "invar_head":

@@ -85,7 +85,12 @@ class WhisperLayerwiseEncoder(nn.Module):
         return hook_fn
 
     @torch.no_grad()
-    def forward(self, waveform: torch.Tensor, sr: int | None = None) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        waveform: torch.Tensor,
+        sr: int | None = None,
+        flatten_activations: bool = True,
+    ) -> dict[str, torch.Tensor]:
         if waveform.dim() == 3:
             waveform = waveform.squeeze(1)
         if sr is not None and sr != WHISPER_SR:
@@ -99,8 +104,12 @@ class WhisperLayerwiseEncoder(nn.Module):
 
         embeddings: dict[str, torch.Tensor] = {}
         for layer_name, layer_act in self._layer_outputs.items():
-            embeddings[layer_name] = layer_act.flatten(start_dim=1)
-        embeddings["ln_post"] = encoder_out.flatten(start_dim=1)
+            embeddings[layer_name] = (
+                layer_act.flatten(start_dim=1) if flatten_activations else layer_act
+            )
+        embeddings["ln_post"] = (
+            encoder_out.flatten(start_dim=1) if flatten_activations else encoder_out
+        )
         self._layer_outputs.clear()
         return embeddings
 

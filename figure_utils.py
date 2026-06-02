@@ -158,31 +158,37 @@ def set_bar_labels(axs,
                    white_text_substrs=["word", "CE"],
                    ymin_bars=0.49,
                    no_olap_pad=0.0225,
+                   inside_fit_tolerance=0.02,
                    fontsize=12,
                    sem_vals=None,
     ):
 
     fig = axs.get_figure()
-    # Y axis size conversion (needed for rotation offset)
-    ax_height_inches = fig.get_figheight() * axs.get_position().height
-    ymin, ymax = axs.get_ylim()
-    points_per_y_data_unit = ax_height_inches * 72 / (ymax - ymin)
-    char_height_data_y = fontsize / points_per_y_data_unit * 0.6
-
-    # X axis size conversion (needed for rotation offset)
-    ax_width_inches = fig.get_figwidth() * axs.get_position().width
-    xmin, xmax = axs.get_xlim()
-    points_per_x_data_unit = ax_width_inches * 72 / (xmax - xmin)
-    char_height_data_x = fontsize / points_per_x_data_unit
+    if fig.canvas is not None:
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    else:
+        renderer = None
 
     for ix, bar in enumerate(bars):
         bar_height = bar.get_height()
         bar_interior = bar_height - ymin_bars
 
         bar_name = plot_names[ix].replace('supervised', 'sup.')
-        label_height_data = len(bar_name) * char_height_data_y
+        if renderer is not None:
+            # Measure rendered, rotated text height directly in data units.
+            tmp_txt = axs.text(0, 0, bar_name, rotation=90, fontsize=fontsize, alpha=0)
+            bbox = tmp_txt.get_window_extent(renderer=renderer)
+            tmp_txt.remove()
+            y0 = axs.transData.inverted().transform((0, 0))[1]
+            y1 = axs.transData.inverted().transform((0, bbox.height))[1]
+            label_height_data = y1 - y0
+        else:
+            # Fallback if renderer is unavailable.
+            label_height_data = len(bar_name) * 0.01
 
-        if label_height_data < bar_interior:
+        # Allow tolerance so borderline labels stay inside bars.
+        if label_height_data <= (bar_interior + inside_fit_tolerance):
             y = ymin_bars
             text_color = "k"
             if white_text_substrs and any(sub_str in bar_name for sub_str in white_text_substrs):
@@ -192,13 +198,13 @@ def set_bar_labels(axs,
             y = top + no_olap_pad
             text_color = "k"
 
-        x = (bar.get_x() + bar.get_width() / 2.) + (char_height_data_x / 2)  # compensate rotation pivot
+        x = (bar.get_x() + bar.get_width() / 2.)  # compensate rotation pivot
         axs.text(
             x,
             y,
             bar_name,
             ha='center',
-            va='bottom',
+            va="bottom",
             rotation=90,
             color=text_color,
             fontsize=fontsize,
@@ -443,6 +449,14 @@ def build_model_palette(hue_order, base_colors=None):
         colors = sns.color_palette('Greens', n_colors=max(len(cochdnn9_other), 2))
         for i, name in enumerate(cochdnn9_other):
             palette[name] = colors[i % len(colors)]
+
+    # Keep AudioMAE models visually distinct and consistent.
+    audiomae_models = [
+        n for n in hue_order
+        if ('audiomae' in n.lower()) or ('audio mae' in n.lower()) or ('audio-mae' in n.lower())
+    ]
+    for name in audiomae_models:
+        palette[name] = 'cyan'
 
     # Ensure ALL models in hue_order have a color (final fallback to gray)
     # This is the absolute final check - every model MUST have a color

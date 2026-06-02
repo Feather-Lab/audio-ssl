@@ -12,7 +12,8 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from lightning_ssl_classifier import SSLClassifier
 from lightning_byola_classifier import BYOLAClassifier
 from audiomae_transfer_module import AudioMAETransferModule
-from whisper_encoder_arch import get_whisper_encoder_layer_map
+from whisper_transfer_module import WhisperTransferModule
+from whisper_encoder_arch import get_whisper_encoder_layer_map, whisper_layer_names_list
 from jsinV3DataLoader_precombined_batched import CleanSpeechInNoiseValDatasetBatched
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
@@ -46,6 +47,7 @@ def cli_main(args):
     L.seed_everything(args.random_seed)
 
     use_audiomae = args.model_type == 'audiomae'
+    use_whisper_pretrained = args.model_type == 'whisper'
 
     if use_audiomae:
         audiomae_layer_idx, audiomae_layer_name = _parse_audiomae_layer_str(args.layer_str)
@@ -61,6 +63,33 @@ def cli_main(args):
             'data': {},
         }
         config_path = pathlib.Path('audiomae_pretrained')
+    elif use_whisper_pretrained:
+        whisper_model_name = getattr(args, 'whisper_model', 'large-v3')
+        import whisper as _whisper
+        _tmp = _whisper.load_model(whisper_model_name)
+        _n_layer = len(_tmp.encoder.blocks)
+        del _tmp
+        layer_names = whisper_layer_names_list(_n_layer)
+        layer_str = args.layer_str
+        if layer_str.isdigit():
+            layer_str = f"encoder_block_{layer_str}"
+        if layer_str not in layer_names:
+            raise ValueError(f"Invalid whisper layer '{layer_str}'. Valid: {layer_names}")
+        whisper_layer_idx = layer_names.index(layer_str)
+        # WhisperTransferModule uses block index; ln_post is handled via n_blocks check
+        whisper_encoder_layer = int(layer_str.split("_")[-1]) if layer_str.startswith("encoder_block_") else _n_layer - 1
+        config = {
+            'model': {
+                'arch_name': f'whisper_{whisper_model_name}',
+                'whisper_model': whisper_model_name,
+                'arch_kwargs': {
+                    'encoder_layer': whisper_encoder_layer,
+                },
+            },
+            'hparas': {},
+            'data': {},
+        }
+        config_path = pathlib.Path(f'whisper_{whisper_model_name}')
     else:
         # Load config
         if args.config_path != "":
@@ -81,8 +110,6 @@ def cli_main(args):
     # Determine which model type to use
     use_whisper = False
     use_byola = False
-    # Only treat as pretrained whisper when explicitly requested.
-    use_whisper_pretrained = args.model_type == 'whisper'
     
     if use_audiomae:
         pass  # handled above
@@ -104,34 +131,39 @@ def cli_main(args):
         if 'arch_kwargs' not in config['model']:
             config['model']['arch_kwargs'] = {}
 
-        encoder_kwargs = config['model']['arch_kwargs'].get('encoder_kwargs', {})
-        n_layer = encoder_kwargs.get('n_layer', 4)
-        layer_name_map = get_whisper_encoder_layer_map(n_layer)
-
-        if args.print_whisper_layers:
-            print(f"Whisper encoder layers (n_layer={n_layer}):")
-            for key in sorted(layer_name_map.keys()):
-                print(f"{key} -> {layer_name_map[key]}")
-            sys.exit(0)
-
-        if args.layer_str.isdigit():
-            layer_idx = int(args.layer_str)
-            if layer_idx < 0 or layer_idx >= n_layer:
-                raise ValueError(
-                    f"Whisper encoder has {n_layer} layers; got index {layer_idx}."
-                )
-            layer_key = f"encoder_block_{layer_idx}"
+        if use_whisper_pretrained:
+            # Layer already validated during inline config build above
+            whisper_layer_str = layer_str  # e.g. "ln_post" or "encoder_block_31"
         else:
-            layer_key = args.layer_str
+            encoder_kwargs = config['model']['arch_kwargs'].get('encoder_kwargs', {})
+            n_layer = encoder_kwargs.get('n_layer', 4)
+            layer_name_map = get_whisper_encoder_layer_map(n_layer)
 
-        if layer_key not in layer_name_map:
-            valid_names = ", ".join(sorted(layer_name_map.keys()))
-            raise ValueError(
-                f"Invalid whisper layer_str '{args.layer_str}'. "
-                f"Use an integer block index or one of: {valid_names}"
-            )
+            if args.print_whisper_layers:
+                print(f"Whisper encoder layers (n_layer={n_layer}):")
+                for key in sorted(layer_name_map.keys()):
+                    print(f"{key} -> {layer_name_map[key]}")
+                sys.exit(0)
 
-        whisper_layer_str = layer_name_map[layer_key]
+            if args.layer_str.isdigit():
+                layer_idx = int(args.layer_str)
+                if layer_idx < 0 or layer_idx >= n_layer:
+                    raise ValueError(
+                        f"Whisper encoder has {n_layer} layers; got index {layer_idx}."
+                    )
+                layer_key = f"encoder_block_{layer_idx}"
+            else:
+                layer_key = args.layer_str
+
+            if layer_key not in layer_name_map:
+                valid_names = ", ".join(sorted(layer_name_map.keys()))
+                raise ValueError(
+                    f"Invalid whisper layer_str '{args.layer_str}'. "
+                    f"Use an integer block index or one of: {valid_names}"
+                )
+
+            whisper_layer_str = layer_name_map[layer_key]
+
         config['model']['arch_kwargs']['time_average'] = (
             False if args.time_avg_rep is None else args.time_avg_rep
         )
@@ -248,8 +280,8 @@ def cli_main(args):
     # get checkpoint for ssl model
     ckpt_path = None
     ckpt_modifier = ''
-    if use_audiomae:
-        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / "audiomae/checkpoints"
+    if use_audiomae or use_whisper_pretrained:
+        checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
     else:
         checkpoint_dir = pathlib.Path(args.model_ckpt_dir) / f"{config_path.stem}/checkpoints"
         if args.ckpt_path == "":
@@ -274,6 +306,8 @@ def cli_main(args):
 
     if use_audiomae:
         module = AudioMAETransferModule(config=config)
+    elif use_whisper_pretrained:
+        module = WhisperTransferModule(config=config)
     elif use_byola:
         module = BYOLAClassifier(config=config)
     else:
@@ -463,6 +497,7 @@ if __name__ == "__main__":
     parser.add_argument('--config_path', default='', type=str, help='Path to experiment config.')
     parser.add_argument('--config_list_path', default='', type=str, help='Path to experiment config.')
     parser.add_argument('--model_type', default='', type=str, help='Model type: "whisper", "audiomae", "byola", or "ssl" (auto-detected if not specified).')
+    parser.add_argument('--whisper_model', default='large-v3', type=str, help='Whisper model name for --model_type whisper (e.g. large-v3).')
     parser.add_argument(
         "--results_dir",
         default=pathlib.Path("./eval_jsin_results"),

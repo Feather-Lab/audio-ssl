@@ -5,12 +5,12 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --mem=256Gb
-#SBATCH --time=3:00:00
+#SBATCH --mem=512Gb
+#SBATCH --time=5:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb
-#SBATCH --array=0-32
+#SBATCH --array=32
 
 module load cuda cudnn nccl
 mamba activate cochdnn_ssl_pl
@@ -20,15 +20,14 @@ export PYTHONPATH=$PYTHONPATH:/mnt/home/igriffith/ceph/projects/cochdnn
 WHISPER_MODEL=large-v3
 echo "Job array ID: $SLURM_ARRAY_TASK_ID  Whisper model: $WHISPER_MODEL"
 
-srun -K python3 -u lightning_scripts/run_param_decoding_single_model_torch.py \
+srun -K python3 -u lightning_scripts/run_param_decoding_single_model.py \
     --model_type whisper \
     --whisper_model "$WHISPER_MODEL" \
     --input_sample_rate 20000 \
     --num_workers "${SLURM_JOB_CPUS_PER_NODE}" \
-    --output_dir parameter_decoding_whisper \
+    --output_dir parameter_decoding_v2 \
     --batch_size 128 \
     --num_eval 10 \
     --num_train 50 \
     --job_id "$SLURM_ARRAY_TASK_ID" \
     --ridge_alpha 0.5 \
-    --regression_device cuda

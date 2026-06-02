@@ -1,14 +1,19 @@
 """
-ESC-50 SVM linear probe evaluation for the pretrained AudioMAE encoder.
+ESC-50 SVM linear probe evaluation for pretrained AudioMAE or Whisper encoders.
 
 Mirrors make_esc_pl_model_plots.py but uses AudioMAE (hance-ai/audiomae)
-with layerwise activation extraction.  For each specified layer, extracts
-time-pooled features for every ESC-50 clip, runs 5-fold cross-validated
-LinearSVC, and saves results + confusion matrix plots.
+or pretrained Whisper with layerwise activation extraction.  For each
+specified layer, extracts time-pooled features for every ESC-50 clip,
+runs 5-fold cross-validated LinearSVC, and saves results + confusion
+matrix plots.
 
-Usage:
-    python eval_audiomae_esc50.py -L 11 -D /tmp/igriffith \
+Usage (AudioMAE):
+    python eval_audiomae_esc50.py -L 12 -D /tmp/igriffith \
         -A 4096 -R 5 -P -C 0.01 0.1 1 10 100
+
+Usage (Whisper large-v3):
+    python eval_audiomae_esc50.py --model_type whisper --whisper_model large-v3 \
+        --layer_name ln_post -D /tmp/igriffith -A 4096 -R 5 -P -C 0.01 0.1 1 10 100
 """
 
 from __future__ import annotations
@@ -48,6 +53,7 @@ from lightning_scripts.audiomae_encoder_utils import (
     AudioMAELayerwiseEncoder,
     preprocess_waveform,
 )
+from lightning_scripts.whisper_encoder_arch import WhisperLayerwiseEncoder, WHISPER_SR
 from robustness.tools.audio_helpers import load_audio_wav_resample
 
 ESC50_DATA_PATH = "/mnt/ceph/users/igriffith/datasets/ESC-50-master/audio/"
@@ -82,7 +88,7 @@ def get_train_and_test(left_out_fold):
 # ---------------------------------------------------------------------------
 
 def extract_features(
-    encoder: AudioMAELayerwiseEncoder,
+    encoder,
     audio_paths: list[str],
     layer: str,
     num_reps: int,
@@ -92,16 +98,20 @@ def extract_features(
     overwrite: bool,
     dur_secs: float = 2.0,
     device: torch.device = torch.device("cpu"),
+    model_type: str = "audiomae",
 ) -> np.ndarray:
-    """Extract AudioMAE features for a list of audio files.
+    """Extract encoder features for a list of audio files.
 
     Returns:
         If num_reps == 1: array of shape (n_sounds, feature_dim)
         If num_reps > 1:  array of shape (n_sounds, num_reps, feature_dim)
     """
     np.random.seed(seed * 2)
-    cache_dir = Path(scratch_dir) / "audiomae_activations" / layer
+    cache_subdir = f"{model_type}_activations"
+    cache_dir = Path(scratch_dir) / cache_subdir / layer
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    target_sr = WHISPER_SR if model_type == "whisper" else AUDIOMAE_SR
 
     all_feats = []
     for idx, audio_path in enumerate(audio_paths):
@@ -114,14 +124,14 @@ def extract_features(
             for _ in range(num_reps):
                 sound, sr = load_audio_wav_resample(
                     audio_path,
-                    resample_SR=AUDIOMAE_SR,
+                    resample_SR=target_sr,
                     DUR_SECS=dur_secs,
                     START_SECS="random",
                 )
                 while sound.sum() == 0:
                     sound, sr = load_audio_wav_resample(
                         audio_path,
-                        resample_SR=AUDIOMAE_SR,
+                        resample_SR=target_sr,
                         DUR_SECS=dur_secs,
                         START_SECS="random",
                     )
@@ -131,25 +141,30 @@ def extract_features(
                     sound = sound / rms * 0.1
 
                 waveform = torch.from_numpy(sound).float().unsqueeze(0)  # (1, T)
-                mel = preprocess_waveform(waveform, sr=AUDIOMAE_SR).to(device)
 
-                encoder._block_outputs.clear()
-                with torch.no_grad():
-                    full_out = encoder.encoder.forward_features(mel)
-
-                if layer == "norm":
-                    tokens = full_out
+                if model_type == "whisper":
+                    embeddings = encoder(waveform.to(device), sr=target_sr, flatten_activations=False)
+                    act = embeddings[layer]  # (1, n_ctx, n_state)
+                    pooled = act.mean(dim=1).cpu().numpy().ravel()  # time-pool
                 else:
-                    tokens = encoder._block_outputs[layer]
+                    mel = preprocess_waveform(waveform, sr=AUDIOMAE_SR).to(device)
+                    encoder._block_outputs.clear()
+                    with torch.no_grad():
+                        full_out = encoder.encoder.forward_features(mel)
 
-                tokens = tokens[:, 1:, :]  # remove CLS
-                feats_4d = tokens.reshape(
-                    1, AUDIOMAE_FREQ_PATCHES, AUDIOMAE_TIME_PATCHES, AUDIOMAE_DIM
-                ).permute(0, 3, 1, 2)
-                # Time-pool -> (1, D, freq) -> flatten
-                pooled = feats_4d.mean(dim=-1).cpu().numpy().ravel()
+                    if layer == "norm":
+                        tokens = full_out
+                    else:
+                        tokens = encoder._block_outputs[layer]
+
+                    tokens = tokens[:, 1:, :]  # remove CLS
+                    feats_4d = tokens.reshape(
+                        1, AUDIOMAE_FREQ_PATCHES, AUDIOMAE_TIME_PATCHES, AUDIOMAE_DIM
+                    ).permute(0, 3, 1, 2)
+                    pooled = feats_4d.mean(dim=-1).cpu().numpy().ravel()
+                    encoder._block_outputs.clear()
+
                 rep_feats.append(pooled)
-                encoder._block_outputs.clear()
 
             feats = np.array(rep_feats)  # (num_reps, feature_dim)
             np.save(cache_file, feats)
@@ -243,8 +258,17 @@ def run_esc50_eval(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    print("Loading AudioMAE …")
-    encoder = AudioMAELayerwiseEncoder(time_pool=True).to(device)
+    model_type = getattr(args, "model_type", "audiomae")
+
+    if model_type == "whisper":
+        whisper_model = getattr(args, "whisper_model", "large-v3")
+        print(f"Loading Whisper ({whisper_model}) …")
+        encoder = WhisperLayerwiseEncoder(whisper_model_name=whisper_model).to(device)
+        net_name = f"whisper_{whisper_model}"
+    else:
+        print("Loading AudioMAE …")
+        encoder = AudioMAELayerwiseEncoder(time_pool=True).to(device)
+        net_name = "audiomae"
 
     layer_names = encoder.layer_names
     if args.layer_idx is not None:
@@ -252,8 +276,6 @@ def run_esc50_eval(args):
     else:
         layer = args.layer_name
     print(f"Evaluating layer: {layer}")
-
-    net_name = "audiomae"
     folds = [1, 2, 3, 4, 5]
 
     all_predictions, all_labels, avg_accuracies = [], [], []
@@ -267,12 +289,12 @@ def run_esc50_eval(args):
         train_feats = extract_features(
             encoder, train_paths, layer, args.num_reps, args.seed,
             args.scratch_dir, sound_ids["train"], overwrite,
-            dur_secs=args.dur_secs, device=device,
+            dur_secs=args.dur_secs, device=device, model_type=model_type,
         )
         test_feats = extract_features(
             encoder, test_paths, layer, args.num_reps, args.seed,
             args.scratch_dir, sound_ids["test"], overwrite,
-            dur_secs=args.dur_secs, device=device,
+            dur_secs=args.dur_secs, device=device, model_type=model_type,
         )
 
         # Normalize
@@ -382,12 +404,17 @@ def run_esc50_eval(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="AudioMAE ESC-50 SVM evaluation")
+    parser = argparse.ArgumentParser(description="ESC-50 SVM evaluation (AudioMAE or Whisper)")
+    parser.add_argument("--model_type", type=str, default="audiomae",
+                        choices=["audiomae", "whisper"],
+                        help="Encoder to evaluate: audiomae or whisper.")
+    parser.add_argument("--whisper_model", type=str, default="large-v3",
+                        help="Whisper model name (e.g. large-v3). Only used when model_type=whisper.")
     parser.add_argument("-L", "--layer_idx", type=int, default=None,
-                        help="Layer index (0-11 for blocks, 12 for norm). "
-                             "Overrides --layer_name.")
+                        help="Layer index. AudioMAE: 0-11=blocks, 12=norm. "
+                             "Whisper: 0..N-1=encoder blocks, N=ln_post. Overrides --layer_name.")
     parser.add_argument("--layer_name", type=str, default="block_11",
-                        help="Layer name (e.g. block_5, norm). Used if --layer_idx not given.")
+                        help="Layer name (e.g. block_5, norm, ln_post). Used if --layer_idx not given.")
     parser.add_argument("-D", "--scratch_dir", type=str, required=True,
                         help="Scratch directory for cached activations.")
     parser.add_argument("-A", "--num_activations", type=int, default=4096,

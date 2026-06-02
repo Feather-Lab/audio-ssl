@@ -17,7 +17,7 @@ import yaml
 from tqdm.auto import tqdm
 
 from lightning_scripts.byola_lightning_module import BYOLAModule
-from lightning_scripts.utils.model_build_utils import get_model
+from lightning_scripts.utils.model_build_utils import get_model, get_checkpoint_path
 
 # Default sample rate for CochDNN / robustness models
 MODEL_SR = 20_000
@@ -25,6 +25,116 @@ BYOLA_SR = 16_000
 DEFAULT_SIG_LENGTH = 40_000
 
 config_dir = Path("/mnt/ceph/users/igriffith/projects/cochdnn/")
+
+# ---------------------------------------------------------------------------
+# CochCNN9 model registry for single-model loading (layerwise evaluation)
+# ---------------------------------------------------------------------------
+
+COCHDNN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    "ssl_0.0": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.0",
+    },
+    "ssl_0.5": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.5",
+    },
+    "scaled_ssl_0.0": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 scaled ssl λ=0.0",
+    },
+    "scaled_ssl_0.5": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 scaled ssl λ=0.5",
+    },
+    "word": {
+        "config": "model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml",
+        "supervised": True,
+        "display_name": "CochCNN9 supervised word",
+    },
+    "audioset": {
+        "config": "model_configs/supervised_models/audioset_kell2018_MatchedDataset_LARS.yaml",
+        "supervised": True,
+        "display_name": "CochCNN9 supervised audioset",
+    },
+    "multitask": {
+        "config": "model_configs/supervised_models/kell2018_word_speaker_audioset_MatchedDataset_LARS.yaml",
+        "supervised": True,
+        "display_name": "CochCNN9 supervised multi-task",
+    },
+    "scaled_supervised": {
+        "config": "model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml",
+        "supervised": True,
+        "display_name": "CochCNN9 scaled supervised",
+    },
+}
+
+
+def load_single_cochdnn_model(
+    model_key: str,
+    device: str = "cuda",
+) -> tuple:
+    """Load a single CochCNN9 model and return a layerwise encoder callable.
+
+    Uses the existing ``ModelWithFrontEnd`` wrapper which already supports
+    ``with_latent=True`` for both SSL and supervised models.
+
+    Args:
+        model_key: Key into :data:`COCHDNN_MODEL_REGISTRY`.
+        device: Torch device string.
+
+    Returns:
+        encoder: callable ``(waveform: Tensor) -> Dict[str, Tensor]``
+            accepting ``(B, 1, T)`` waveforms at 20 kHz and returning
+            flattened ``(B, D)`` activations keyed by layer name.
+        display_name: Human-readable model name for CSV output.
+        layer_names: Ordered list of available layer names.
+    """
+    from lightning_scripts.lightning_classifier_matched_speech_in_noise import (
+        LitWordAudioSetModel,
+    )
+    from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL
+
+    info = COCHDNN_MODEL_REGISTRY[model_key]
+    config_path = config_dir / info["config"]
+    with open(config_path, "r") as f:
+        config = yaml.load(f, Loader=yaml.FullLoader)
+    checkpoint_path = get_checkpoint_path(config_path)
+
+    if info["supervised"]:
+        lit_module = LitWordAudioSetModel.load_from_checkpoint(
+            checkpoint_path=checkpoint_path, config=config, strict=True,
+        ).eval()
+    else:
+        lit_module = LitAudioSSL.load_from_checkpoint(
+            checkpoint_path=checkpoint_path, config=config, strict=True,
+        ).eval()
+
+    layer_names = list(lit_module.metamer_layers)
+    model_with_frontend = lit_module.model.eval()
+
+    for p in model_with_frontend.parameters():
+        p.requires_grad = False
+
+    dev = torch.device(device if torch.cuda.is_available() else "cpu")
+    model_with_frontend = model_with_frontend.to(dev)
+
+    @torch.no_grad()
+    def encoder(waveform: torch.Tensor) -> Dict[str, torch.Tensor]:
+        _, _, all_outputs = model_with_frontend(
+            waveform, with_latent=True, fake_relu=False,
+        )
+        return {
+            k: v.flatten(start_dim=1)
+            for k, v in all_outputs.items()
+            if isinstance(v, torch.Tensor)
+        }
+
+    return encoder, info["display_name"], layer_names
 
 def get_cochdnn9_models(
     layer_out: str = "relufc",

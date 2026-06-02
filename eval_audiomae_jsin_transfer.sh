@@ -32,4 +32,4 @@ srun python3 lightning_scripts/eval_jsin_transfer_matched.py \
     --train_epochs 12 \
     --gpus $num_gpus \
     --checkpoint_every_n_steps 2000 \
-    --no-with_noise --no-eval_only --no-lr_scheduler --use_classifier_ckpt --with_dropout
+    --no-with_noise --eval_only --no-lr_scheduler --use_classifier_ckpt --with_dropout
