@@ -1,3 +1,6 @@
 [submodule "auditory_brain_dnn"]
 	path = auditory_brain_dnn
 	url = git@github.com:jenellefeather/auditory_brain_dnn_for_audio_ssl.git
+[submodule "byol-a"]
+	path = byol-a
+	url = git@github.com:nttcslab/byol-a.git
