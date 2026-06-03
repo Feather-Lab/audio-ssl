@@ -1,4 +1,13 @@
 #!/bin/bash -l
+#SBATCH --job-name=extract_demo_audio
+#SBATCH --output=outLogs/extract_demo_audio_%A.out
+#SBATCH --error=outLogs/extract_demo_audio_%A.err
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16Gb
+#SBATCH --time=00:30:00
+#SBATCH --partition=gpu
+#SBATCH -N 1
+
 # Extract demo audio batch for audio_transforms_demo.ipynb (I/O-bound HDF5 read).
 #
 # Required environment variables (set before sbatch or in your shell profile):
@@ -8,15 +17,6 @@
 # Writes float32 waveforms to notebooks/demo_notebooks/demo_audio_batch/.
 # Submit from the repository root:
 #   sbatch slurm_scripts/extract_demo_audio_batch.sh
-
-#SBATCH --job-name=extract_demo_audio
-#SBATCH --output=outLogs/extract_demo_audio_%A.out
-#SBATCH --error=outLogs/extract_demo_audio_%A.err
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=16Gb
-#SBATCH --time=00:30:00
-#SBATCH --partition=cpu
-#SBATCH -N 1
 
 mamba activate cochdnn_ssl_pl
 

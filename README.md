@@ -17,7 +17,36 @@ decoding, and fMRI prediction.
 
 See `RELEASE_MANIFEST.md` for the intended release surface.
 
+Release development lives on branch `to_share` (not merged to `main` until review).
+
+## Repository Layout
+
+- `lightning_scripts/` — CE-SSL training (`train.py`), transfer and zero-shot eval, parameter decoding, `optimizers.py` (LARS / cosine warmup)
+- `robustness/` — vendored lab fork (matched audio transforms, Kell2018/ResNet models)
+- `slurm_scripts/` — cluster entry points for training, evaluation, and demo asset extraction
+- `model_configs/` — release YAML configs; `train_config_manifests/` — NSynth eval manifest
+- `notebooks/demo_notebooks/` — minimal demos; `notebooks/*.ipynb` — figure analyses (see manifest)
+- `fmri_analysis/`, `analysis_scripts/`, `parameter_decoding/`, `default_paths.py`
+- Submodules: `auditory_brain_dnn/`, `byol-a/`
+
 ## Setup
+
+Clone with submodules. External dependencies live in git submodules; the
+modified `robustness/` tree is vendored in the parent repository (required for CE-SSL
+audio transforms and encoder code — not a submodule):
+
+```bash
+git clone --recurse-submodules <repo-url>
+cd cochdnn
+# or, after a plain clone:
+git submodule update --init --recursive
+```
+
+Git submodules: `auditory_brain_dnn`, `byol-a` ([nttcslab/byol-a](https://github.com/nttcslab/byol-a)).
+`robustness/` ships with the parent repo (lab-modified fork; see `RELEASE_MANIFEST.md`).
+After init, place BYOL-A pretrained checkpoints under
+`byol-a/pretrained_weights/` if needed (see upstream BYOL-A docs; weights are not
+tracked in the parent repo).
 
 Create the conda environment used by the retained scripts:
 

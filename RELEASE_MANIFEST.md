@@ -1,5 +1,7 @@
 # Release Manifest
 
+> Release work on branch `to_share`; do not merge to `main` until review.
+
 This branch is prepared for sharing code associated with the anonymous CCN 2026
 submission on contrastive-equivariant self-supervised learning for audio.
 
@@ -9,13 +11,25 @@ submission on contrastive-equivariant self-supervised learning for audio.
   `figure_utils.py`, and this manifest.
 - Core model/evaluation code:
   - `lightning_scripts/` — CE-SSL training (`train.py`), transfer/zero-shot eval,
-    parameter decoding, and plotting entry points used by SLURM scripts.
-  - `audio_ssl/`, `robustness/`, `analysis_scripts/`, `fmri_analysis/`
+    parameter decoding, plotting entry points used by SLURM scripts, and LARS /
+    `CosineWarmupScheduler` optimizers (`lightning_scripts/optimizers.py`).
+  - `robustness/` (vendored in-repo fork with lab modifications —
+  not a submodule), `analysis_scripts/`, `fmri_analysis/`
   - `data_scripts/extract_nsynth.py` — NSynth tarball helper referenced by eval loaders
   - `data_scripts/extract_demo_audio_batch.py` — optional JSIN/Audionoise clip extractor for the audio-transforms demo
   - `notebooks/demo_notebooks/demo_audio_batch/` — small pre-extracted speech/noise waveforms for `audio_transforms_demo.ipynb`
-- `byol-a/` — BYOL-A baseline eval (`byol-a/config.yaml`); vendored without nested
-  `.git` or `test/`.
+- Git submodules (initialize with `git submodule update --init --recursive`):
+  - `auditory_brain_dnn/` — [jenellefeather/auditory_brain_dnn_for_audio_ssl](https://github.com/jenellefeather/auditory_brain_dnn_for_audio_ssl.git);
+    parent tracks the commit pointer only.
+  - `byol-a/` — [nttcslab/byol-a](https://github.com/nttcslab/byol-a); parent tracks
+    commit pointer only (`byol-a/config.yaml` after init). Pretrained `.pth` weights
+    stay local/upstream, not in the parent index.
+- `robustness/` — vendored in the parent repo (modified copy of upstream robustness
+  code). Release training/eval imports mainly `robustness/audio_functions/` (matched
+  audio transforms, input representations, JSIN loss helpers) and
+  `robustness/audio_models/` (Kell2018/ResNet backbones via
+  `lightning_scripts/architectures.py`); some scripts also use
+  `robustness/tools/audio_helpers.py`. Do not add `robustness` to `.gitmodules`.
 - `model_checkpoints/` — not bundled; directory may exist locally with trained weights.
 - `model_configs/` — 24 release YAMLs (CE-SSL λ-sweep, supervised baselines,
   `audiomae_pretrained_natsounds.yaml`, `whisper_pretrained_*.yaml`); no `old_configs/`,
