@@ -1,3 +1,4 @@
+from default_paths import JSIN_PATH, require_path
 import torch 
 import torch.nn as nn 
 import lightning as L
@@ -387,7 +388,7 @@ class SSLClassifier(L.LightningModule):
     
     def train_dataloader(self):
         # set train dataloader as attr so we can rotate examples every epoch 
-        dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+        dataset = jsinV3_precombined_all_signals(root=str(require_path(JSIN_PATH, "COCHDNN_JSIN_DIR", "JSIN/WSN dataset")),
                                                  train=True,
                                                  transform=None, # perform transforms in collate_fn
                                                  batch_size=self.config['hparas']['batch_size'])
@@ -403,7 +404,7 @@ class SSLClassifier(L.LightningModule):
         return train_dataloader
     
     def val_dataloader(self):
-        dataset = jsinV3_precombined_all_signals(root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+        dataset = jsinV3_precombined_all_signals(root=str(require_path(JSIN_PATH, "COCHDNN_JSIN_DIR", "JSIN/WSN dataset")),
                                                  train=False,
                                                  transform=None,
                                                  batch_size=self.config['hparas']['batch_size'],

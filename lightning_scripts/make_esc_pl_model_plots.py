@@ -7,11 +7,11 @@ import os
 import scipy
 from dataclasses import dataclass
 import matplotlib.pylab as plt
-# sys.path.append('/om/user/jfeather/python-packages/tfmatching/')
 # import synthhelpers
 # use robustness.tools.audio_helpers instead of synthhelpers
 from robustness.tools import audio_helpers
 import pandas
+from default_paths import ESC50_DIR, require_path
 from sklearn import preprocessing
 import time
 from sklearn.metrics import confusion_matrix
@@ -476,7 +476,7 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
     net_name : str
         name of the network
     scratch_activations_dir : str
-        directory in /om2/scratch/ to save the activations 
+        directory used to cache activations 
     layer : str
         name of layer in model's build_network.py metamer_layers variable
     num_activations : int
@@ -497,8 +497,9 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
         if true, using BYOL-A arch which does not have layer dict
     """
     folds = [1, 2, 3, 4, 5]
-    data_path = '/mnt/ceph/users/igriffith/datasets/ESC-50-master/audio/' # .wav files of the sound clips
-    fold_info_path = '/mnt/ceph/users/igriffith/datasets/ESC-50-master/meta/esc50.csv'
+    esc50_root = require_path(ESC50_DIR, 'COCHDNN_ESC50_DIR', 'ESC-50 dataset')
+    data_path = str(esc50_root / 'audio') + '/' # .wav files of the sound clips
+    fold_info_path = esc50_root / 'meta' / 'esc50.csv'
 
     all_predictions = []
     all_labels = []
@@ -611,7 +612,7 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
     print("'all_svcs': (list) SVM parameters learned.")
 
     # get target-category mapping so it's in saved_vars.pickle
-    fold_info_path = '/mnt/ceph/users/igriffith/datasets/ESC-50-master/meta/esc50.csv'
+    fold_info_path = esc50_root / 'meta' / 'esc50.csv'
     df = pandas.read_csv(fold_info_path)
     target_to_category = {}
     while len(target_to_category)<50:

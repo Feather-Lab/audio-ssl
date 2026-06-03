@@ -2,8 +2,7 @@
 """
 Utility script to extract NSynth dataset tar.gz files.
 
-The NSynth dataset should be located at /mnt/home/igriffith/ceph/datasets/nsynth
-and contain three tar.gz files:
+Set COCHDNN_NSYNTH_DIR or pass --nsynth_root to the directory containing:
 - nsynth-train.jsonwav.tar.gz
 - nsynth-valid.jsonwav.tar.gz
 - nsynth-test.jsonwav.tar.gz
@@ -13,11 +12,11 @@ This script extracts them if not already extracted and verifies the directory st
 
 import tarfile
 import os
-import pathlib
 from pathlib import Path
+from default_paths import NSYNTH_DIR, require_path
 
 
-def extract_nsynth(nsynth_root="/mnt/home/igriffith/ceph/datasets/nsynth", force=False):
+def extract_nsynth(nsynth_root=None, force=False):
     """
     Extract NSynth tar.gz files if not already extracted.
     
@@ -28,6 +27,8 @@ def extract_nsynth(nsynth_root="/mnt/home/igriffith/ceph/datasets/nsynth", force
     Returns:
         True if extraction successful or already extracted, False otherwise
     """
+    if nsynth_root is None:
+        nsynth_root = require_path(NSYNTH_DIR, "COCHDNN_NSYNTH_DIR", "NSynth dataset")
     nsynth_root = Path(nsynth_root)
     
     if not nsynth_root.exists():
@@ -104,8 +105,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--nsynth_root",
         type=str,
-        default="/mnt/home/igriffith/ceph/datasets/nsynth",
-        help="Root directory containing NSynth tar.gz files"
+        default=None,
+        help="Root directory containing NSynth tar.gz files. Defaults to COCHDNN_NSYNTH_DIR."
     )
     parser.add_argument(
         "--force",

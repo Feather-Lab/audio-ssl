@@ -35,6 +35,8 @@ import pandas as pd
 import torch
 from tqdm.auto import tqdm
 
+from default_paths import TONE_PERFECT_DIR, require_path
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "lightning_scripts"))
@@ -104,7 +106,11 @@ def _triplet_collate(batch):
 def run_mandarin(encoder, model_name, device, target_sr, n_examples=2000):
     from lightning_scripts.tone_perfect_triplet_dataset import TonePerfectDataset
 
-    tone_perfect_dir = Path("~/ceph/datasets/tone_perfect").expanduser()
+    tone_perfect_dir = require_path(
+        TONE_PERFECT_DIR,
+        "COCHDNN_TONE_PERFECT_DIR",
+        "Tone Perfect dataset",
+    )
     ds = TonePerfectDataset(
         tone_perfect_dir,
         resample_sr=target_sr,

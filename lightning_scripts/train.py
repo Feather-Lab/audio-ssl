@@ -18,7 +18,6 @@ from lightning_ssl import LitAudioSSL
 from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_ssl_matched_audioset_only import LitAudioSSL as LitAudioSSLMatchedAudioset
-from lightning_ssl_imagenet import LitImageSSL 
 from lightning_ssl_audioset import LitAudioSetSSL
 
 from lightning.pytorch.strategies import DDPStrategy
@@ -58,11 +57,8 @@ def cli_main(args):
 
     # get task-specific inits 
     classifier = False
-    if any(task_str in config_path.stem for task_str in ['ssl', 'imagenet', 'barlow', 'mmcr']):
-        if 'imagenet' in config_path.stem:
-            module = LitImageSSL
-
-        elif config['hparas'].get('sep_class_opt', False):
+    if any(task_str in config_path.stem for task_str in ['ssl', 'barlow', 'mmcr']):
+        if config['hparas'].get('sep_class_opt', False):
             module = LitAudioSSLSepClassOpt
 
         elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":

@@ -8,7 +8,7 @@ features for every ESC-50 clip, runs 5-fold cross-validated LinearSVC,
 and saves results + confusion matrix plots.
 
 Usage:
-    python eval_whisper_esc50.py -L 32 -D /tmp/igriffith \
+    python eval_whisper_esc50.py -L 32 -D ${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn} \
         -A 4096 -R 5 -P -C 0.01 0.1 1 10 100 \
         --whisper_model large-v3
 """
@@ -34,6 +34,8 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import GridSearchCV, ShuffleSplit
 from sklearn.multiclass import OneVsRestClassifier
 
+from default_paths import ESC50_DIR, require_path
+
 matplotlib.rcParams.update({"font.size": 26})
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -49,8 +51,9 @@ from lightning_scripts.whisper_encoder_arch import (
 )
 from robustness.tools.audio_helpers import load_audio_wav_resample
 
-ESC50_DATA_PATH = "/mnt/ceph/users/igriffith/datasets/ESC-50-master/audio/"
-ESC50_FOLD_PATH = "/mnt/ceph/users/igriffith/datasets/ESC-50-master/meta/esc50.csv"
+ESC50_ROOT = require_path(ESC50_DIR, "COCHDNN_ESC50_DIR", "ESC-50 dataset")
+ESC50_DATA_PATH = ESC50_ROOT / "audio"
+ESC50_FOLD_PATH = ESC50_ROOT / "meta" / "esc50.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -65,11 +68,11 @@ def get_train_and_test(left_out_fold):
 
     for _, row in df.iterrows():
         if row["fold"] == left_out_fold:
-            test_paths.append(ESC50_DATA_PATH + row["filename"])
+            test_paths.append(str(ESC50_DATA_PATH / row["filename"]))
             test_labels.append(row["target"])
             test_ids.append(row["filename"])
         else:
-            train_paths.append(ESC50_DATA_PATH + row["filename"])
+            train_paths.append(str(ESC50_DATA_PATH / row["filename"]))
             train_labels.append(row["target"])
             train_ids.append(row["filename"])
 

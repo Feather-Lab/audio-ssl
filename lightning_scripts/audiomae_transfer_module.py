@@ -13,6 +13,7 @@ from typing import Union
 
 import numpy as np
 import torch
+from default_paths import JSIN_PATH, require_path
 import torch.nn as nn
 import lightning as L
 import torchaudio
@@ -317,7 +318,7 @@ class AudioMAETransferModule(L.LightningModule):
 
     def train_dataloader(self):
         dataset = jsinV3_precombined_all_signals(
-            root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+            root=str(require_path(JSIN_PATH, "COCHDNN_JSIN_DIR", "JSIN/WSN dataset")),
             train=True,
             transform=None,
             batch_size=self.config["hparas"]["batch_size"],
@@ -333,7 +334,7 @@ class AudioMAETransferModule(L.LightningModule):
 
     def val_dataloader(self):
         dataset = jsinV3_precombined_all_signals(
-            root="/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/",
+            root=str(require_path(JSIN_PATH, "COCHDNN_JSIN_DIR", "JSIN/WSN dataset")),
             train=False,
             transform=None,
             batch_size=self.config["hparas"]["batch_size"],

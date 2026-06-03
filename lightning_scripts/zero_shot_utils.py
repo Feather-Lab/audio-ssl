@@ -16,6 +16,7 @@ import torchaudio
 import yaml
 from tqdm.auto import tqdm
 
+from default_paths import WORKING_DIRECTORY
 from lightning_scripts.byola_lightning_module import BYOLAModule
 from lightning_scripts.utils.model_build_utils import get_model, get_checkpoint_path
 
@@ -24,7 +25,7 @@ MODEL_SR = 20_000
 BYOLA_SR = 16_000
 DEFAULT_SIG_LENGTH = 40_000
 
-config_dir = Path("/mnt/ceph/users/igriffith/projects/cochdnn/")
+config_dir = WORKING_DIRECTORY
 
 # ---------------------------------------------------------------------------
 # CochCNN9 model registry for single-model loading (layerwise evaluation)

@@ -15,7 +15,7 @@ would only duplicate model-loading cost.
 
     # enumerate jobs, then submit
     python eval_whisper_layerwise_zero_shot.py --list_jobs
-    sbatch --array=0-5 eval_whisper_layerwise_zero_shot.sh
+    sbatch --array=0-5 slurm_scripts/eval_whisper_layerwise_zero_shot.sh
 
     # or run a single job locally
     python eval_whisper_layerwise_zero_shot.py --job_id 0
@@ -38,6 +38,8 @@ import torch
 import torch.nn as nn
 import whisper
 from tqdm.auto import tqdm
+
+from default_paths import TONE_PERFECT_DIR, require_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -161,7 +163,7 @@ def _triplet_collate(batch):
 def run_mandarin(encoder, model_name, device, n_examples=2000):
     from lightning_scripts.tone_perfect_triplet_dataset import TonePerfectDataset
 
-    tone_perfect_dir = Path("~/ceph/datasets/tone_perfect").expanduser()
+    tone_perfect_dir = require_path(TONE_PERFECT_DIR, "COCHDNN_TONE_PERFECT_DIR", "Tone Perfect dataset")
     ds = TonePerfectDataset(
         tone_perfect_dir,
         resample_sr=WHISPER_SR,

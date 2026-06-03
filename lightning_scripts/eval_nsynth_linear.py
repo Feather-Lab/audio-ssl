@@ -489,9 +489,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--nsynth_root',
-        default='/mnt/home/igriffith/ceph/datasets/nsynth',
+        default=None,
         type=str,
-        help='Root directory containing NSynth dataset.'
+        help='Root directory containing NSynth dataset. Defaults to COCHDNN_NSYNTH_DIR.'
     )
     parser.add_argument(
         '--optimizer',

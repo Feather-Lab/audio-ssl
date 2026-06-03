@@ -6,10 +6,10 @@ audio_transforms:
   high_snr: 10
   low_snr: -10
 data:
-  speech_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/train_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
-  noise_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_unbalanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5' 
-  val_speech_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/jsinV3BalancedProcessed/sr_20000/splits/valid_stackedDataframeHDF_n150_VJRUH4IEPDGPNH2JZMULSQKOWYNQ6KMM.pdh5'
-  val_noise_h5_path: '/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_balanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5' 
+  speech_h5_path: '${COCHDNN_JSIN_TRAIN_H5}'
+  noise_h5_path: '${COCHDNN_AUDIONOISE_TRAIN_H5}' 
+  val_speech_h5_path: '${COCHDNN_JSIN_VALID_H5}'
+  val_noise_h5_path: '${COCHDNN_AUDIONOISE_VALID_H5}' 
   dataset: MatchedSpeechInNoiseDatasetBatched
   target_keys: ['signal/word_int', 'signal/speaker_int', 'noise/labels_int']
   blocked_batches: True

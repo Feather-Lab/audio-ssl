@@ -1,7 +1,6 @@
 
 import torch
 from torch import nn
-# import torchvision
 import torch.nn.functional as F
 import lightning as L
 import os, sys
@@ -11,11 +10,9 @@ sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
 from torchmetrics.classification import Accuracy, BinaryPrecision
 import losses as ssl_losses
-# import audio_ssl.losses as ssl_losses 
 
 from audio_ssl.misc import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
-# from pprint import pprint
 
 from jsinV3DataLoader_precombined_batched import MatchedAudiosetBatched, MatchedSpeechInNoiseDatasetBatched
 import robustness.audio_functions.audio_transforms as at
@@ -43,7 +40,7 @@ class LitAudioSSL(L.LightningModule):
         self.save_hyperparameters()
         self.config = config 
 
-        # Get audio config and init representation 
+        # Build the waveform-to-representation frontend used by the encoder.
         self.audio_config = AUDIO_INPUT_REPRESENTATIONS[config['audio_rep']['name']]
         self.audio_rep = at.AudioToAudioRepresentation(**self.audio_config)
 

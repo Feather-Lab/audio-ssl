@@ -67,17 +67,9 @@ from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL 
 from lightning_scripts.lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 import robustness.audio_functions.audio_transforms as at
 from robustness.tools.audio_helpers import load_audio_wav_resample
-# from analysis_scripts.default_paths import fMRI_DATA_PATH
 
 import itertools
 
-
-# def preproc_sound_np(sound):
-#     sound = sound - np.mean(sound)
-#     sound = sound/np.sqrt(np.mean(sound**2))*0.1
-#     sound = np.expand_dims(sound, 0)
-#     sound = torch.from_numpy(sound).float().cuda()
-#     return sound
 
 transforms = at.AudioCompose([
                     at.AudioToTensor(),
