@@ -13,7 +13,7 @@ from pytorch_lightning.loggers import WandbLogger
 import robustness.audio_functions.audio_transforms as at 
 from datasets import load_dataset
 
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import pathlib
 from torchaudio.functional import resample

@@ -30,7 +30,7 @@ setup(
     version="1.0.0",
     description="Contrastive-equivariant self-supervised audio representation models.",
     long_description=readme,
-    packages=find_packages(include=["audio_ssl*", "lightning_scripts*", "robustness*"]),
+    packages=find_packages(include=["lightning_scripts*", "robustness*"]),
     py_modules=["default_paths", "figure_utils"],
     install_requires=requirements,
     license="MIT",

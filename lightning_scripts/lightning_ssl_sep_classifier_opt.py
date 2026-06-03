@@ -10,9 +10,8 @@ sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
 from metrics import calculate_accuracy
 import losses as ssl_losses
-# import audio_ssl.losses as ssl_losses 
 
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
 # from pprint import pprint
 

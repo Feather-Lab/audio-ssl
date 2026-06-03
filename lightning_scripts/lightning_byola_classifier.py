@@ -11,7 +11,7 @@ from byol_a.common import *
 from byol_a.augmentations import PrecomputedNorm
 from byol_a.models import AudioNTT2020
 from easydict import EasyDict
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss

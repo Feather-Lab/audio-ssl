@@ -11,7 +11,7 @@ from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 import robustness.audio_functions.audio_transforms as at
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 
 def get_whisper_layer_name_map(whisper_model_name: str) -> tuple[dict[str, int], int]:
     """Return a layer-name map and layer count for a Whisper encoder."""

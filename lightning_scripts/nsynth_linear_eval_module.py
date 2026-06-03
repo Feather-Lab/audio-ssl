@@ -12,7 +12,7 @@ import torchaudio
 import sys
 from typing import Union, Optional
 from lightning_ssl_classifier import SSLClassifier
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import torch.nn.functional as F
 from nsynth_dataset import NsynthDataset

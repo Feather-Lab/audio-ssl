@@ -29,7 +29,7 @@ from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 import robustness.audio_functions.audio_transforms as at
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 
 
 class AudioMAETransferModule(L.LightningModule):

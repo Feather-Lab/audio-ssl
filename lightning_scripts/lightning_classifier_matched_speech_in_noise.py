@@ -14,7 +14,7 @@ from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_l
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
 
 sys.path.append('./lightning_scripts/')
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import (
     MatchedSpeechInNoiseDatasetBatched,
     MatchedAudiosetBatched,

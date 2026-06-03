@@ -7,7 +7,7 @@ from typing import Union
 from lightning_ssl import LitAudioSSL 
 from whisper_encoder_arch import get_whisper_encoder_layer_sizes
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitAudioSupervised
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from jsinV3DataLoader_precombined_batched import jsinV3_precombined_all_signals
 from torchmetrics.classification import Accuracy, BinaryPrecision
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
