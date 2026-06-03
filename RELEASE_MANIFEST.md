@@ -2,8 +2,9 @@
 
 > Release work on branch `to_share`; do not merge to `main` until review.
 
-This branch is prepared for sharing code associated with the anonymous CCN 2026
-submission on contrastive-equivariant self-supervised learning for audio.
+This branch shares code for contrastive-equivariant self-supervised learning
+for audio, accompanying the deposited paper
+[10.32470/uqprhu8](https://doi.org/10.32470/uqprhu8).
 
 ## Keep
 

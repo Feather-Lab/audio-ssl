@@ -1,7 +1,8 @@
 # CE-SSL Audio Representations
 
-Code for an anonymous CCN 2026 submission on contrastive-equivariant
-self-supervised learning (CE-SSL) for general-purpose audio representations.
+Code for contrastive-equivariant self-supervised learning (CE-SSL) for
+general-purpose audio representations, accompanying the deposited paper
+[10.32470/uqprhu8](https://doi.org/10.32470/uqprhu8).
 The project adapts a contrastive-equivariant objective to audio, trains
 CochCNN9-style encoders, and evaluates representations with transfer probes,
 zero-shot triplet judgments, parameter decoding, and fMRI prediction.
