@@ -1,4 +1,9 @@
-import os 
+import os
+import sys
+
+# Support `python lightning_scripts/train.py` and `from lightning_scripts.train import ...`
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import torch 
 import yaml 
 import pickle 
@@ -11,14 +16,10 @@ from argparse import ArgumentParser
 from lightning.pytorch.callbacks import LearningRateMonitor
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 
-#TODO: Make below a module dict that can import right lightning module from config 
 from lightning_classifier import LitWordAudioSetModel
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
-from lightning_ssl import LitAudioSSL 
-from lightning_ssl_sep_classifier_opt import LitAudioSSL as LitAudioSSLSepClassOpt
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 from lightning_ssl_matched_audioset_only import LitAudioSSL as LitAudioSSLMatchedAudioset
-from lightning_ssl_audioset import LitAudioSetSSL
 
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.plugins.environments import SLURMEnvironment
@@ -58,20 +59,13 @@ def cli_main(args):
     # get task-specific inits 
     classifier = False
     if any(task_str in config_path.stem for task_str in ['ssl', 'barlow', 'mmcr']):
-        if config['hparas'].get('sep_class_opt', False):
-            module = LitAudioSSLSepClassOpt
-
-        elif config['data'].get('dataset', False) == "MatchedSpeechInNoiseDatasetBatched":
+        dataset_name = config['data'].get('dataset')
+        if dataset_name == "MatchedSpeechInNoiseDatasetBatched":
             module = LitAudioSSLMatched
-
-        elif config['data'].get('dataset', False) == "MatchedAudiosetBatched":
+        elif dataset_name == "MatchedAudiosetBatched":
             module = LitAudioSSLMatchedAudioset
-
-        elif config.get('module', None):
-            module =  eval(config['module'])
-
         else:
-            module = LitAudioSSL
+            raise ValueError(f"No supported SSL dataset in {config_path}")
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
 
     else:

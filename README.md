@@ -1,13 +1,8 @@
 # CE-SSL Audio Representations
 
 Code for contrastive-equivariant self-supervised learning (CE-SSL) for
-general-purpose audio representations, accompanying the deposited paper
+general-purpose audio representations, accompanying the paper
 [10.32470/uqprhu8](https://doi.org/10.32470/uqprhu8).
-The project adapts a contrastive-equivariant objective to audio, trains
-CochCNN9-style encoders, and evaluates representations with transfer probes,
-zero-shot triplet judgments, parameter decoding, and fMRI prediction.
-
-Release work lives on branch `to_share` and is not merged to `main` yet.
 
 ## What Is Included
 

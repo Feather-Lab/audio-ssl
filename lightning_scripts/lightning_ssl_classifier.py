@@ -1,10 +1,15 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from default_paths import JSIN_PATH, require_path
 import torch 
 import torch.nn as nn 
 import lightning as L
 import re
 from typing import Union
-from lightning_ssl import LitAudioSSL 
+from lightning_ssl_matched_speech_in_noise import LitAudioSSL
 from whisper_encoder_arch import get_whisper_encoder_layer_sizes
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitAudioSupervised
 from optimizers import LARS, CosineWarmupScheduler

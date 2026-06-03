@@ -702,8 +702,6 @@ def get_predictions_and_make_plots(model, net_name, scratch_activations_dir,
 if __name__ == '__main__':
     import argparse
     from lightning_classifier import LitWordAudioSetModel
-    from lightning_ssl import LitAudioSSL
-    from lightning_ssl_audioset import LitAudioSetSSL
     from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
     from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
 
@@ -792,10 +790,8 @@ if __name__ == '__main__':
         ckpt_str = '_best_val_ckpt'
 
     if config.get('module', None):
-        module =  eval(config['module']).load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
-    elif 'ssl' in config_path.stem:
-        module = LitAudioSSL.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
-    if config['data'].get('dataset', False) in ["MatchedSpeechInNoiseDatasetBatched", "MatchedAudiosetBatched"]:
+        module = eval(config['module']).load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
+    elif config['data'].get('dataset', False) in ["MatchedSpeechInNoiseDatasetBatched", "MatchedAudiosetBatched"]:
         if config['hparas'].get('ssl_task', False):
             module = LitAudioSSLMatched.load_from_checkpoint(checkpoint_path=ckpt_path, config=config)
         else:
