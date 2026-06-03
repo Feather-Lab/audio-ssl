@@ -2,38 +2,46 @@
 
 Code for an anonymous CCN 2026 submission on contrastive-equivariant
 self-supervised learning (CE-SSL) for general-purpose audio representations.
-The project adapts a contrastive-equivariant objective to audio and evaluates
-representations with transfer probes, zero-shot triplet judgments, parameter
-decoding, and fMRI prediction.
+The project adapts a contrastive-equivariant objective to audio, trains
+CochCNN9-style encoders, and evaluates representations with transfer probes,
+zero-shot triplet judgments, parameter decoding, and fMRI prediction.
+
+Release work lives on branch `to_share` and is not merged to `main` yet.
 
 ## What Is Included
 
-- CE-SSL/iSSL training and evaluation code for CochCNN9-style audio encoders.
-- Linear-probe evaluation scripts for ESC-50, Speech Commands, NSynth, and
-  restricted WSN/JSIN word tasks.
+- CE-SSL training and evaluation for CochCNN9-style audio encoders.
+- Linear-probe evaluation for ESC-50, Speech Commands, NSynth, and restricted
+  WSN/JSIN word tasks.
 - Zero-shot triplet evaluation for intensity, melody, and Mandarin tone tasks.
-- Parameter-decoding and fMRI-analysis entry points used for paper analyses.
-- Minimal demo notebooks in `notebooks/demo_notebooks/`.
-
-See `RELEASE_MANIFEST.md` for the intended release surface.
-
-Release development lives on branch `to_share` (not merged to `main` until review).
+- Parameter-decoding and fMRI-analysis entry points used in the paper.
+- Demo notebooks in `notebooks/demo_notebooks/` and figure notebooks listed in
+  `RELEASE_MANIFEST.md`.
 
 ## Repository Layout
 
-- `lightning_scripts/` — CE-SSL training (`train.py`), transfer and zero-shot eval, parameter decoding, `optimizers.py` (LARS / cosine warmup)
-- `robustness/` — vendored lab fork (matched audio transforms, Kell2018/ResNet models)
-- `slurm_scripts/` — cluster entry points for training, evaluation, and demo asset extraction
-- `model_configs/` — release YAML configs; `train_config_manifests/` — NSynth eval manifest
-- `notebooks/demo_notebooks/` — minimal demos; `notebooks/*.ipynb` — figure analyses (see manifest)
-- `fmri_analysis/`, `analysis_scripts/`, `parameter_decoding/`, `default_paths.py`
-- Submodules: `auditory_brain_dnn/`, `byol-a/`
+```
+lightning_scripts/     training, eval, parameter decoding; optimizers.py (LARS, cosine warmup)
+robustness/            vendored lab fork (matched audio transforms, Kell2018/ResNet backbones)
+slurm_scripts/         cluster entry points for all heavy jobs
+model_configs/         release training/eval YAMLs
+notebooks/             demo_notebooks/ plus paper figure notebooks (see manifest)
+fmri_analysis/         fMRI feature extraction and prediction utilities
+default_paths.py       COCHDNN_* path resolution for scripts
+```
+
+Git submodules: `auditory_brain_dnn/`, `byol-a/` (see Setup). The legacy
+`audio_ssl/` package was removed; optimizers now live in
+`lightning_scripts/optimizers.py`.
+
+See `RELEASE_MANIFEST.md` for the full release surface, SLURM script list, and
+removed paths.
 
 ## Setup
 
 Clone with submodules. External dependencies live in git submodules; the
-modified `robustness/` tree is vendored in the parent repository (required for CE-SSL
-audio transforms and encoder code — not a submodule):
+modified `robustness/` tree is vendored in the parent repository (required for
+CE-SSL audio transforms and encoder code — not a submodule):
 
 ```bash
 git clone --recurse-submodules <repo-url>
@@ -42,13 +50,16 @@ cd cochdnn
 git submodule update --init --recursive
 ```
 
-Git submodules: `auditory_brain_dnn`, `byol-a` ([nttcslab/byol-a](https://github.com/nttcslab/byol-a)).
-`robustness/` ships with the parent repo (lab-modified fork; see `RELEASE_MANIFEST.md`).
-After init, place BYOL-A pretrained checkpoints under
-`byol-a/pretrained_weights/` if needed (see upstream BYOL-A docs; weights are not
-tracked in the parent repo).
+Submodules:
 
-Create the conda environment used by the retained scripts:
+- `auditory_brain_dnn/` — [jenellefeather/auditory_brain_dnn_for_audio_ssl](https://github.com/jenellefeather/auditory_brain_dnn_for_audio_ssl.git)
+- `byol-a/` — [nttcslab/byol-a](https://github.com/nttcslab/byol-a)
+
+After init, place BYOL-A pretrained checkpoints under
+`byol-a/pretrained_weights/` if needed (see upstream BYOL-A docs; weights are
+not tracked in the parent repo).
+
+Create the conda environment used by the release scripts:
 
 ```bash
 mamba env create -f environment.yml
@@ -58,7 +69,7 @@ pip install -e .
 
 The release scripts activate `cochdnn_ssl_pl`. If you use a different
 environment name, update the scripts locally or activate your environment before
-running the Python commands directly.
+running Python commands directly.
 
 ## Cluster Execution
 
@@ -74,11 +85,13 @@ Logs go to `outLogs/`. Set dataset and checkpoint paths via the environment
 variables below before submitting; this release does not assume local GPUs or
 full datasets on a laptop or interactive node.
 
-## Quickstart
+## Demos
 
-Start with the demo notebooks:
+Start with the demo notebooks (lightweight; suitable for a CPU notebook server
+once paths are set):
 
-- `notebooks/demo_notebooks/audio_transforms_demo.ipynb` — CE-SSL matched transforms on a fixed real speech/noise batch (`demo_audio_batch/`)
+- `notebooks/demo_notebooks/audio_transforms_demo.ipynb` — CE-SSL matched
+  transforms on a fixed real speech/noise batch (`demo_audio_batch/`)
 - `notebooks/demo_notebooks/zero_shot_eval_demo.ipynb` — NSynth melody-match
   triplets with CE-SSL CochCNN9 (`COCHDNN_CHECKPOINT_DIR`, `COCHDNN_NSYNTH_DIR`)
 
@@ -91,10 +104,12 @@ that folder on the cluster with
 ## Data And Checkpoints
 
 Datasets and checkpoints are not bundled. Configure paths with environment
-variables:
+variables (also documented in `default_paths.py`):
 
 ```bash
 export COCHDNN_CHECKPOINT_DIR=/path/to/model_checkpoints
+export COCHDNN_MODEL_DIR=/path/to/model_directories      # optional; default under repo root
+export COCHDNN_DATA_ROOT=/path/to/datasets               # optional shared root
 export COCHDNN_ESC50_DIR=/path/to/ESC-50-master
 export COCHDNN_NSYNTH_DIR=/path/to/nsynth
 export COCHDNN_TONE_PERFECT_DIR=/path/to/tone_perfect
@@ -103,11 +118,20 @@ export COCHDNN_JSIN_TRAIN_H5=/path/to/train_speech.h5
 export COCHDNN_JSIN_VALID_H5=/path/to/valid_speech.h5
 export COCHDNN_AUDIONOISE_TRAIN_H5=/path/to/train_noise.h5
 export COCHDNN_AUDIONOISE_VALID_H5=/path/to/valid_noise.h5
+export COCHDNN_EXP_DIR=/path/to/training_outputs           # optional; default ./exp
+export COCHDNN_SCRATCH_DIR=/path/to/scratch                # optional; some eval scripts
 ```
 
-`COCHDNN_JSIN_*` and fMRI assets refer to restricted datasets and are needed
-only for the corresponding training, WSN/JSIN transfer, parameter-decoding, and
-neural-prediction analyses.
+`COCHDNN_JSIN_*`, Audionoise HDF5 paths, and fMRI assets refer to restricted
+datasets and are needed only for the corresponding training, WSN/JSIN transfer,
+parameter-decoding, and neural-prediction analyses.
+
+## Figure Reproduction
+
+Paper figure notebooks under `notebooks/` expect SLURM-generated outputs such as
+`eval_jsin_results/`, `parameter_decoding_v2/`, and related directories — rerun
+the matching `slurm_scripts/` jobs first. See `RELEASE_MANIFEST.md` for the
+notebook list and output paths.
 
 ## Example Commands
 
@@ -137,6 +161,6 @@ For AudioMAE or Whisper baselines, use the corresponding `eval_audiomae_*`,
 
 ## Notes
 
-The demos are intended to check mechanics and provide minimal reproducible
-examples. Full paper reproduction requires the private/restricted datasets,
-model checkpoints, and compute resources used for the reported experiments.
+The demos check mechanics and provide minimal reproducible examples. Full paper
+reproduction requires the private/restricted datasets, model checkpoints, and
+compute resources used for the reported experiments.
