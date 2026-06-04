@@ -1,4 +1,4 @@
-# Human-aligned Universal Audio Representations with Contrastive-Equivariant Self-Supervised Learning
+# Toward Human-aligned Universal Audio Representations with Contrastive-Equivariant Self-Supervised Learning
 
 Official repo for the CCN 2026 paper [*Toward Human-aligned Universal Audio Representations with Contrastive-Equivariant Self-Supervised Learning*](https://doi.org/10.32470/uqprhu8).
 
