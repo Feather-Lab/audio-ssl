@@ -20,6 +20,8 @@ import yaml
 from lightning import seed_everything
 from tqdm import tqdm
 
+from default_paths import JSIN_PATH, require_path
+
 from lightning_scripts.jsinV3DataLoader_precombined_batched import (
     jsinV3_precombined_all_signals,
 )
@@ -43,7 +45,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 # Constants
-JSIN_PATH = "/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/"
+JSIN_PATH = str(require_path(JSIN_PATH, "COCHDNN_JSIN_DIR", "JSIN/WSN dataset"))
 CROP_LENGTH = 40_000  # 2 seconds at 20kHz
 SAMPLE_RATE = 20_000
 DBSPL_LEVEL = 60

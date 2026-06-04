@@ -20,7 +20,7 @@ from audiomae_encoder_utils import (
     AUDIOMAE_TIME_PATCHES,
     preprocess_waveform,
 )
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 import whisper
 from whisper_encoder_arch import WHISPER_SR
 

@@ -12,6 +12,8 @@ from typing import Optional, Dict, List, Tuple
 import numpy as np
 from torchaudio.transforms import Resample
 
+from default_paths import NSYNTH_DIR, require_path
+
 
 class NsynthDataset(torch.utils.data.Dataset):
     """
@@ -35,7 +37,7 @@ class NsynthDataset(torch.utils.data.Dataset):
     
     def __init__(
         self,
-        nsynth_root: str = "/mnt/home/igriffith/ceph/datasets/nsynth",
+        nsynth_root: str | None = None,
         split: str = "train",
         task: str = "family",
         label_field: Optional[str] = None,
@@ -45,7 +47,11 @@ class NsynthDataset(torch.utils.data.Dataset):
     ):
         super().__init__()
         
-        self.nsynth_root = Path(nsynth_root)
+        self.nsynth_root = Path(
+            nsynth_root
+            if nsynth_root is not None
+            else require_path(NSYNTH_DIR, "COCHDNN_NSYNTH_DIR", "NSynth dataset")
+        )
         self.split = split
         self.task = task
         self.sample_rate = sample_rate
@@ -219,7 +225,7 @@ class NsynthDataModule:
     
     def __init__(
         self,
-        nsynth_root: str = "/mnt/home/igriffith/ceph/datasets/nsynth",
+        nsynth_root: str | None = None,
         task: str = "family",
         label_field: Optional[str] = None,
         sample_rate: int = 20000,
@@ -229,7 +235,11 @@ class NsynthDataModule:
         num_workers: int = 4,
         pin_memory: bool = True,
     ):
-        self.nsynth_root = nsynth_root
+        self.nsynth_root = (
+            nsynth_root
+            if nsynth_root is not None
+            else str(require_path(NSYNTH_DIR, "COCHDNN_NSYNTH_DIR", "NSynth dataset"))
+        )
         self.task = task
         self.label_field = label_field
         self.sample_rate = sample_rate
@@ -241,7 +251,7 @@ class NsynthDataModule:
         
         # Create datasets
         self.train_dataset = NsynthDataset(
-            nsynth_root=nsynth_root,
+            nsynth_root=self.nsynth_root,
             split='train',
             task=task,
             label_field=label_field,
@@ -251,7 +261,7 @@ class NsynthDataModule:
         )
         
         self.val_dataset = NsynthDataset(
-            nsynth_root=nsynth_root,
+            nsynth_root=self.nsynth_root,
             split='valid',
             task=task,
             label_field=label_field,
@@ -261,7 +271,7 @@ class NsynthDataModule:
         )
         
         self.test_dataset = NsynthDataset(
-            nsynth_root=nsynth_root,
+            nsynth_root=self.nsynth_root,
             split='test',
             task=task,
             label_field=label_field,

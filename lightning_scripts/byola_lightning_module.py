@@ -7,6 +7,7 @@ from easydict import EasyDict
 import torchaudio 
 import torch
 import lightning as L
+from default_paths import WORKING_DIRECTORY
 
 
 class BYOLAModule(L.LightningModule):
@@ -38,7 +39,8 @@ class BYOLAModule(L.LightningModule):
         self.model = AudioNTT2020(d=self.config.feature_d)
         # Determine device - use CPU for loading, Lightning will move to GPU later
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model.load_weight('/mnt/ceph/users/igriffith/projects/cochdnn/byol-a/pretrained_weights/AudioNTT2020-BYOLA-64x96d2048.pth', device)
+        weight_path = WORKING_DIRECTORY / "byol-a" / "pretrained_weights" / "AudioNTT2020-BYOLA-64x96d2048.pth"
+        self.model.load_weight(str(weight_path), device)
         self.model = self.model.eval()
         # Need to manually freeze params here 
         self.model.trainable = False

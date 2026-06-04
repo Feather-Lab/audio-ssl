@@ -4,11 +4,12 @@ from lightning_scripts.lightning_classifier_matched_speech_in_noise import (
 )
 from pathlib import Path
 import os
+from default_paths import MODEL_CHECKPOINT_DIR
 from lightning_scripts.lightning_ssl_matched_speech_in_noise import LitAudioSSL
 import torch.nn as nn
 import yaml
 
-exp_dir = Path("/mnt/home/igriffith/ceph/projects/cochdnn/model_checkpoints")
+exp_dir = MODEL_CHECKPOINT_DIR
 
 def get_checkpoint_path(config_path: Path, exp_dir: Path = exp_dir) -> str:  
     checkpoint_dir = exp_dir / f"{config_path.stem}/checkpoints"

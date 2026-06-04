@@ -7,8 +7,15 @@ from robustness.audio_functions import audio_transforms
 from torchaudio.transforms import Resample
 import pandas as pd
 import logging
+import os
+from default_paths import WORKING_DIRECTORY
 
-# import psutil  # uncomment for tracking process in debug notebook
+def _resolve_h5_path(path):
+    """Expand env-var placeholders used in release YAML configs."""
+    resolved = os.path.expanduser(os.path.expandvars(str(path)))
+    if "$" in resolved:
+        raise RuntimeError(f"Unresolved environment variable in HDF5 path: {path}")
+    return resolved
 
 
 class jsinV3_precombined_all_signals(torch.utils.data.ConcatDataset):
@@ -162,11 +169,7 @@ class H5Dataset(torch.utils.data.Dataset):
         self.target_keys = target_keys
         self.batch_size = batch_size
 
-        # These TODOs are not implemented for the release. HDF5 files are
-        # already shuffled, so we can run through them directly.
-        # TODO: implement chunking the hdf5 file so that we can shuffle the data
-        # TODO: implement shuffling the audioset and the speech separately
-        # self.chunk_size = hdf5_chunk_size
+        # HDF5 files are already shuffled, so the release loader streams them directly.
         with h5py.File(self.file_path, "r", swmr=True) as file:
             self.dataset_len = (
                 len(file["sources"]["signal"]["signal"]) // self.batch_size
@@ -190,7 +193,6 @@ class H5Dataset(torch.utils.data.Dataset):
         start = index * self.batch_size
         end = start + self.batch_size
 
-        # print(f"start ix: {start} on pid {psutil.Process().pid}") # uncomment for notebook print statements
         # Before transforms, set the signal and the noise
         signal = self.dataset["sources"]["signal"]["signal"][start:end]
         noise = self.dataset["sources"]["noise"]["signal"][start:end]
@@ -243,11 +245,7 @@ class H5DatasetPairedBatched(torch.utils.data.Dataset):
         self.target_keys = target_keys
         self.batch_size = batch_size
 
-        # These TODOs are not implemented for the release. HDF5 files are
-        # already shuffled, so we can run through them directly.
-        # TODO: implement chunking the hdf5 file so that we can shuffle the data
-        # TODO: implement shuffling the audioset and the speech separately
-        # self.chunk_size = hdf5_chunk_size
+        # HDF5 files are already shuffled, so the release loader streams them directly.
         with h5py.File(self.file_path, "r", swmr=True) as file:
             self.dataset_len = len(file["sources"]["signal"]["signal"])
         if self.dataset_len % 2 == 1:
@@ -349,6 +347,8 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
             overfit=False,
     ):
         super().__init__()
+        speech_h5_path = _resolve_h5_path(speech_h5_path)
+        noise_h5_path = _resolve_h5_path(noise_h5_path)
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
         self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
@@ -377,9 +377,8 @@ class MatchedSpeechInNoiseDatasetBatched(torch.utils.data.Dataset):
         """
         Loads the mapping between the word IDX and human readable word map.
         """
-        word_and_speaker_encodings = pickle.load(
-            open("/mnt/home/igriffith/ceph/projects/cochdnn/robustness/audio_functions/word_and_speaker_encodings_jsinv3.pckl", "rb")
-        )
+        encoding_path = WORKING_DIRECTORY / "robustness" / "audio_functions" / "word_and_speaker_encodings_jsinv3.pckl"
+        word_and_speaker_encodings = pickle.load(open(encoding_path, "rb"))
         class_map = word_and_speaker_encodings["word_idx_to_word"]
         return class_map, word_and_speaker_encodings
 
@@ -538,6 +537,7 @@ class MatchedAudiosetBatched(torch.utils.data.Dataset):
             max_retries=10,
     ):
         super().__init__()
+        noise_h5_path = _resolve_h5_path(noise_h5_path)
         self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
         self.num_noise_files = len(self.noise_files['wav'])
         self.batch_size = batch_size
@@ -810,6 +810,7 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
             overfit=False,
     ):
         super().__init__()
+        speech_h5_path = _resolve_h5_path(speech_h5_path)
         self.speech_files = h5py.File(speech_h5_path, 'r', swmr=True)
         self.speech_metadata = pd.read_hdf(speech_h5_path)
         self.speech_metadata = self.speech_metadata.dropna() ## Removes null label 
@@ -821,7 +822,9 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
         self.set_dbSPL = audio_transforms.DBSPLNormalizeForegroundAndBackground(db_spl)
 
         if self.return_noise:
-            noise_h5_path = "/mnt/home/jfeather/ceph/data/training_datasets_audio/audioset_dataframes/sr20000/cullLabels_silence/sr20000_unbalanced_train_segments_raw_exclude_speech_and_only_music_maxZerosPercent10.pdh5"
+            noise_h5_path = os.environ.get("COCHDNN_AUDIONOISE_H5")
+            if noise_h5_path is None:
+                raise RuntimeError("Set COCHDNN_AUDIONOISE_H5 to return background noise examples.")
             self.noise_files = h5py.File(noise_h5_path, 'r', swmr=True)
             self.num_noise_files = len(self.noise_files['ndarray_data']['signal'])
 
@@ -830,9 +833,8 @@ class CleanSpeechInNoiseValDatasetBatched(torch.utils.data.Dataset):
         """
         Loads the mapping between the word IDX and human readable word map.
         """
-        word_and_speaker_encodings = pickle.load(
-            open("/mnt/home/igriffith/ceph/projects/cochdnn/robustness/audio_functions/word_and_speaker_encodings_jsinv3.pckl", "rb")
-        )
+        encoding_path = WORKING_DIRECTORY / "robustness" / "audio_functions" / "word_and_speaker_encodings_jsinv3.pckl"
+        word_and_speaker_encodings = pickle.load(open(encoding_path, "rb"))
         class_map = word_and_speaker_encodings["word_idx_to_word"]
         return class_map, word_and_speaker_encodings
 

@@ -1,7 +1,6 @@
 
 import torch
 from torch import nn
-# import torchvision
 import torch.nn.functional as F
 import lightning as L
 import os, sys
@@ -11,13 +10,11 @@ sys.path.append(os.path.join(os.path.abspath(os.getcwd()), "lightning_scripts"))
 import architectures
 from torchmetrics.classification import Accuracy, BinaryPrecision
 import losses as ssl_losses
-# import audio_ssl.losses as ssl_losses 
 
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from typing import List, Union, Tuple
-# from pprint import pprint
 
-from jsinV3DataLoader_precombined_batched import MatchedSpeechInNoiseDatasetBatched
+from jsinV3DataLoader_precombined_batched import MatchedAudiosetBatched, MatchedSpeechInNoiseDatasetBatched
 import robustness.audio_functions.audio_transforms as at
 from robustness.audio_functions.jsinV3_loss_functions import jsinV3_multi_task_loss
 from robustness.audio_functions.audio_input_representations import AUDIO_INPUT_REPRESENTATIONS
@@ -43,7 +40,7 @@ class LitAudioSSL(L.LightningModule):
         self.save_hyperparameters()
         self.config = config 
 
-        # Get audio config and init representation 
+        # Build the waveform-to-representation frontend used by the encoder.
         self.audio_config = AUDIO_INPUT_REPRESENTATIONS[config['audio_rep']['name']]
         self.audio_rep = at.AudioToAudioRepresentation(**self.audio_config)
 
@@ -99,6 +96,12 @@ class LitAudioSSL(L.LightningModule):
         # scaling factor to apply to self-supervised task loss - default is 1.
         self.lambda_ssl = self.config['hparas'].get('lambda_ssl', 1.0)
         self.skip_pairing = self.config['hparas'].get('skip_pairing', False)
+        self.dataset_name = self.config['data'].get('dataset')
+        self.val_dataset_name = self.config['data'].get('val_dataset', "MatchedSpeechInNoiseDatasetBatched")
+        self.label_pad_dim = self.config['data'].get(
+            'label_pad_dim',
+            527 if self.dataset_name == "MatchedAudiosetBatched" else None,
+        )
         self.opt_supervised_task = self.config['model']['arch_kwargs']['supervised']
         if self.opt_supervised_task:
             self.multi_task_loss = jsinV3_multi_task_loss(task_loss_params=config['hparas']['task_loss_params'],
@@ -330,6 +333,9 @@ class LitAudioSSL(L.LightningModule):
                 view_labels = {}
                 if isinstance(label_set, dict):
                     for key, l in label_set.items():
+                        l = l.squeeze()
+                        if self.label_pad_dim and l.ndim > 1 and l.shape[-1] < self.label_pad_dim:
+                            l = F.pad(l, (0, self.label_pad_dim - l.shape[-1]), mode='constant', value=0)
                         view_labels[key] = l.squeeze()
                     labels.append(view_labels)
                 else:
@@ -337,55 +343,73 @@ class LitAudioSSL(L.LightningModule):
             return all_audio, labels 
         elif len(batch) == 4: # no labels
             return [audio.unsqueeze(1) for audio in batch]
-  
-    def train_dataloader(self):
-        # set train dataloader as attr so we can rotate examples every epoch 
-        dataset = MatchedSpeechInNoiseDatasetBatched(speech_h5_path=self.config['data']['speech_h5_path'],
-                                                     noise_h5_path=self.config['data']['noise_h5_path'],
-                                                     low_db=self.config['audio_transforms']['low_snr'],
-                                                     high_db=self.config['audio_transforms']['high_snr'],
-                                                     db_spl=self.config['audio_transforms']['dbspl'],
-                                                     batch_size=self.config['hparas']['batch_size'],
-                                                     target_keys=self.config['data'].get("target_keys", None),
-                                                     blocked_batches=self.config['data'].get("blocked_batches", False),
-                                                     signal_augment=self.config['data'].get("signal_augment", False),
-                                                     skip_aug_match=self.config['data'].get("skip_aug_match", False),
-                                                     )
+
+    def _build_speech_in_noise_dataset(self, split):
+        path_prefix = "val_" if split == "val" else ""
+        return MatchedSpeechInNoiseDatasetBatched(
+            speech_h5_path=self.config['data'][f'{path_prefix}speech_h5_path'],
+            noise_h5_path=self.config['data'][f'{path_prefix}noise_h5_path'],
+            low_db=self.config['audio_transforms']['low_snr'],
+            high_db=self.config['audio_transforms']['high_snr'],
+            db_spl=self.config['audio_transforms']['dbspl'],
+            batch_size=self.config['hparas']['batch_size'],
+            target_keys=self.config['data'].get("target_keys", None),
+            blocked_batches=self.config['data'].get("blocked_batches", False),
+            signal_augment=self.config['data'].get("signal_augment", False),
+            skip_aug_match=self.config['data'].get("skip_aug_match", False),
+            clean_percentage=self.config['data'].get("clean_percentage", 0.0),
+            overfit=self.config['data'].get('overfit', False),
+        )
+
+    def _build_audioset_dataset(self, split):
+        path_prefix = "val_" if split == "val" else ""
+        return MatchedAudiosetBatched(
+            noise_h5_path=self.config['data'][f'{path_prefix}noise_h5_path'],
+            low_db=self.config['audio_transforms']['low_snr'],
+            high_db=self.config['audio_transforms']['high_snr'],
+            db_spl=self.config['audio_transforms']['dbspl'],
+            batch_size=self.config['hparas']['batch_size'],
+            target_keys=self.config['data'].get("target_keys", None),
+            blocked_batches=self.config['data'].get("blocked_batches", False),
+            signal_augment=self.config['data'].get("signal_augment", False),
+            skip_aug_match=self.config['data'].get("skip_aug_match", False),
+            clean_percentage=self.config['data'].get("clean_percentage", 0.0),
+            in_sample_rate=self.config['data'].get('in_sample_rate', 16_000),
+            out_sample_rate=self.config['data'].get('out_sample_rate', 20_000),
+            overfit=self.config['data'].get('overfit', False),
+        )
+
+    def _build_dataset(self, split):
+        dataset_name = self.dataset_name if split == "train" else self.val_dataset_name
+        if dataset_name == "MatchedSpeechInNoiseDatasetBatched":
+            return self._build_speech_in_noise_dataset(split)
+        if dataset_name == "MatchedAudiosetBatched":
+            return self._build_audioset_dataset(split)
+        raise ValueError(f"Unsupported SSL {split} dataset: {dataset_name}")
+
+    def _build_dataloader(self, split):
+        dataset = self._build_dataset(split)
+        shuffle = split == "train"
+        drop_last = split == "train"
         
-        train_dataloader = torch.utils.data.DataLoader(
+        dataloader = torch.utils.data.DataLoader(
             dataset,
             batch_size=1,
             num_workers=self.config['num_workers'], 
             pin_memory=True,
             # persistent_workers=True,
-            shuffle=True,
+            shuffle=shuffle,
             collate_fn=self.collate_fn,
-            drop_last=True
+            drop_last=drop_last,
         )
-        return train_dataloader
+
+        return dataloader
+
+    def train_dataloader(self):
+        return self._build_dataloader("train")
     
     def val_dataloader(self):
-        dataset = MatchedSpeechInNoiseDatasetBatched(speech_h5_path=self.config['data']['val_speech_h5_path'],
-                                                     noise_h5_path=self.config['data']['val_noise_h5_path'],
-                                                     low_db=self.config['audio_transforms']['low_snr'],
-                                                     high_db=self.config['audio_transforms']['high_snr'],
-                                                     db_spl=self.config['audio_transforms']['dbspl'],
-                                                     batch_size=self.config['hparas']['batch_size'],
-                                                     signal_augment=self.config['data'].get("signal_augment", False),
-                                                     skip_aug_match=self.config['data'].get("skip_aug_match", False),
-                                                     target_keys=self.config['data'].get("target_keys", None),
-                                                     )
-        dataloader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=1,
-            num_workers=self.config['num_workers'],
-            shuffle=False,
-            collate_fn=self.collate_fn,
-            # drop_last=True
-
-        )
-        print(f"Rank {self.trainer.local_rank} N training batches {len(dataloader)}")
-        return dataloader
+        return self._build_dataloader("val")
 
     # @property
     def total_training_steps(self) -> int:

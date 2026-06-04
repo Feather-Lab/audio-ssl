@@ -12,10 +12,11 @@ import torchaudio
 import sys
 from typing import Union, Optional
 from lightning_ssl_classifier import SSLClassifier
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import torch.nn.functional as F
 from nsynth_dataset import NsynthDataset
+from default_paths import NSYNTH_DIR, require_path
 
 from byola_lightning_module import BYOLAModule
 from audiomae_encoder_utils import (
@@ -44,7 +45,7 @@ class NSynthLinearEvalModule(L.LightningModule):
         w_mlp=False,
         mlp_dim=512,
         with_dropout=False,
-        nsynth_root: str = "/mnt/home/igriffith/ceph/datasets/nsynth",
+        nsynth_root: str | None = None,
         task: str = "family",
         label_field: Optional[str] = None,
         duration: Optional[float] = None,
@@ -62,7 +63,11 @@ class NSynthLinearEvalModule(L.LightningModule):
         self.w_mlp = w_mlp
         self.mlp_dim = mlp_dim
         self.with_dropout = with_dropout
-        self.nsynth_root = nsynth_root
+        self.nsynth_root = str(
+            nsynth_root
+            if nsynth_root is not None
+            else require_path(NSYNTH_DIR, "COCHDNN_NSYNTH_DIR", "NSynth dataset")
+        )
         self.task = task
         self.label_field = label_field
         self.duration = duration

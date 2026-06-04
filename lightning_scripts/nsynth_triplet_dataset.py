@@ -9,13 +9,15 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 
+from default_paths import NSYNTH_DIR
+
 
 class NsynthTripletDataset(torch.utils.data.Dataset):
     """Self-contained NSynth interval-triplet generator with resampling."""
 
     def __init__(
         self,
-        nsynth_root: Path = Path("/mnt/home/igriffith/ceph/datasets/nsynth"),
+        nsynth_root: Path | None = None,
         split: str = "valid",
         target_sr: int = 20_000,
         n_examples: int = 300,
@@ -34,6 +36,10 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
         balance_by_family: bool = True,
     ):
         super().__init__()
+        if nsynth_root is None:
+            if NSYNTH_DIR is None:
+                raise RuntimeError("Set COCHDNN_NSYNTH_DIR to the local NSynth directory.")
+            nsynth_root = NSYNTH_DIR
         self.nsynth_root = Path(nsynth_root)
         self.split = split
         self.target_sr = target_sr
@@ -74,8 +80,10 @@ class NsynthTripletDataset(torch.utils.data.Dataset):
 
         self.metadata_path = self.nsynth_root / f"nsynth-{split}" / "examples.json"
         self.audio_dir = self.nsynth_root / f"nsynth-{split}" / "audio"
-        assert self.metadata_path.exists(), f"Missing metadata: {self.metadata_path}"
-        assert self.audio_dir.exists(), f"Missing audio dir: {self.audio_dir}"
+        if not self.metadata_path.exists():
+            raise FileNotFoundError(f"Missing metadata: {self.metadata_path}")
+        if not self.audio_dir.exists():
+            raise FileNotFoundError(f"Missing audio dir: {self.audio_dir}")
 
         with self.metadata_path.open() as f:
             self.metadata: Dict[str, Dict] = json.load(f)

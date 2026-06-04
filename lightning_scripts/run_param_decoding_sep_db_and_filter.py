@@ -272,7 +272,7 @@ def extract_features_param_decoding(model_1, model_2, loader, layer='avgpool', n
 
 def main(args):
     batch_size = args.batch_size
-    jsin_path = '/mnt/ceph/users/jfeather/data/training_datasets_audio/JSIN_all_v3/subsets/'
+    jsin_path = str(require_path(JSIN_PATH, 'COCHDNN_JSIN_DIR', 'JSIN/WSN dataset'))
 
     train_dataset = jsinV3_precombined_all_signals(root=jsin_path,
                                             train=True,

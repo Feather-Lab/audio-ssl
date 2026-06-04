@@ -5,7 +5,7 @@ import lightning as L
 import yaml
 import sys, os
 import pickle
-from lightning_ssl import LitAudioSSL 
+from lightning_ssl_matched_speech_in_noise import LitAudioSSL
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
@@ -13,7 +13,7 @@ from pytorch_lightning.loggers import WandbLogger
 import robustness.audio_functions.audio_transforms as at 
 from datasets import load_dataset
 
-from audio_ssl.misc import LARS, CosineWarmupScheduler
+from optimizers import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import pathlib
 from torchaudio.functional import resample

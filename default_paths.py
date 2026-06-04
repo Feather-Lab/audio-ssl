@@ -1,13 +1,35 @@
+"""Repository and dataset paths used by release scripts.
+
+No lab-local paths are hardcoded here. Set the ``COCHDNN_*`` environment
+variables below to point scripts at datasets or checkpoints on your system.
 """
-Contains the paths to datasets and model checkpoints directory. Used in other scripts in the repository. 
-"""
+
+from __future__ import annotations
 
 import os
+from pathlib import Path
 
-WORKING_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
-MODEL_CHECKPOINT_DIR = os.path.join(WORKING_DIRECTORY, 'model_checkpoints')
-MODEL_DIRECTORY = os.path.join(WORKING_DIRECTORY, 'model_directories')
-JSIN_PATH = '/om4/group/mcdermott/projects/ibmHearingAid/assets/data/datasets/JSIN_v3.00/nStim_20000/2000ms/rms_0.1/noiseSNR_-10_10/stimSR_20000/reverb_none/noise_all/JSIN_all_v3/subsets'
-if not os.path.exists(JSIN_PATH):
-    JSIN_PATH = None
-    print('### WARNING: UNABLE TO FIND JSIN AUDIO TRAINING DATASET FILES. IF TRAINING AUDIO MODELS, CHANGE PATH SPECIFIED IN analysis_scripts/default_paths.py. MODELS CAN BE LOADED AND TESTED WITHOUT THESE FILES. ###')
+WORKING_DIRECTORY = Path(__file__).resolve().parent
+MODEL_CHECKPOINT_DIR = Path(
+    os.environ.get("COCHDNN_CHECKPOINT_DIR", WORKING_DIRECTORY / "model_checkpoints")
+)
+MODEL_DIRECTORY = Path(os.environ.get("COCHDNN_MODEL_DIR", WORKING_DIRECTORY / "model_directories"))
+
+DATA_ROOT = Path(os.environ["COCHDNN_DATA_ROOT"]) if "COCHDNN_DATA_ROOT" in os.environ else None
+JSIN_PATH = Path(os.environ["COCHDNN_JSIN_DIR"]) if "COCHDNN_JSIN_DIR" in os.environ else None
+ESC50_DIR = Path(os.environ["COCHDNN_ESC50_DIR"]) if "COCHDNN_ESC50_DIR" in os.environ else None
+NSYNTH_DIR = Path(os.environ["COCHDNN_NSYNTH_DIR"]) if "COCHDNN_NSYNTH_DIR" in os.environ else None
+TONE_PERFECT_DIR = (
+    Path(os.environ["COCHDNN_TONE_PERFECT_DIR"])
+    if "COCHDNN_TONE_PERFECT_DIR" in os.environ
+    else None
+)
+
+
+def require_path(path: Path | None, env_var: str, description: str) -> Path:
+    """Return a configured path or raise a clear setup error."""
+    if path is None:
+        raise RuntimeError(
+            f"{description} is not configured. Set {env_var} to the local path."
+        )
+    return path
