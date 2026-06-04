@@ -4,6 +4,8 @@ Official repo for the CCN 2026 paper [*Toward Human-aligned Universal Audio Repr
 
 This repository implements CE-SSL training and evaluation for CochCNN9-style encoders, including linear-probe transfer, zero-shot triplet tasks, parameter decoding, and fMRI analyses reported in the paper.
 
+![CE-SSL schematic](fig_1_schematic_alt.png)
+
 ## Getting Started
 
 Clone with submodules, then create the conda environment:
@@ -24,15 +26,17 @@ pip install -e .
 
 ## Navigating the Code
 
-Training configs live in `model_configs/` and control model hyperparameters, audio representation settings, dataset paths, loss settings, optimizer settings, and validation metrics. The main CE-SSL lambda sweep uses files named like `kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml`; supervised controls are under `model_configs/supervised_models/`; pretrained AudioMAE and Whisper evaluation configs are also included.
+- [Training configs](model_configs/) control model hyperparameters, audio representation settings, dataset paths, loss settings, optimizer settings, and validation metrics. The main CE-SSL lambda sweep uses files named like [`kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml`](model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml); supervised controls are under [`model_configs/supervised_models/`](model_configs/supervised_models/); pretrained AudioMAE and Whisper evaluation configs are also included.
 
-The main training entry point is `lightning_scripts/train.py`. It reads one of these YAML configs, chooses the appropriate Lightning module, and configures trainer-level details such as checkpointing, logging, devices, and resume behavior.
+- [`lightning_scripts/train.py`](lightning_scripts/train.py) is the main training entry point. It reads one YAML config, chooses the appropriate Lightning module, and configures trainer-level details such as checkpointing, logging, devices, and resume behavior.
 
-The CE-SSL training logic lives in `lightning_scripts/lightning_ssl_matched_speech_in_noise.py`. This Lightning module selects train and validation datasets from the YAML config, so the same module handles matched speech-in-noise training and AudioSet-only training. It defines how waveform views pass through the audio frontend and encoder + projector, how losses are combined, and how the optimizer and lr scheduler are constructed. It uses audio frontends from `robustness.audio_functions.audio_transforms`, encoders and projectors from `lightning_scripts/architectures.py`, and SSL losses from `lightning_scripts/losses/`.
+- [`lightning_scripts/lightning_ssl_matched_speech_in_noise.py`](lightning_scripts/lightning_ssl_matched_speech_in_noise.py) contains the CE-SSL training logic. The module selects train and validation datasets from the YAML config, so the same module handles matched speech-in-noise training and AudioSet-only training. It defines how waveform views pass through the audio frontend and encoder + projector, how losses are combined, and how the optimizer and lr scheduler are constructed.
 
-The core CE-SSL loss is `Paired_Loss` in `lightning_scripts/losses/paired_loss.py`. It combines an invariant SSL loss across matched views with an equivariant loss on representation differences; the config parameter `lmda` controls the equivariant weight. The included configs use Barlow Twins losses from `lightning_scripts/losses/barlow.py`, with other SSL losses available in `lightning_scripts/losses/`.
+- [`lightning_scripts/architectures.py`](lightning_scripts/architectures.py) defines the encoders and projection heads used by SSL training, including CochCNN9/Kell2018-style and baseline backbones.
 
-Audio transforms and waveform-to-representation code are in `robustness/audio_functions/`. The matched dataloaders are in `lightning_scripts/jsinV3DataLoader_precombined_batched.py`: `MatchedSpeechInNoiseDatasetBatched` creates four matched speech/noise views, while `MatchedAudiosetBatched` creates matched AudioSet-only views. Dataset paths, SNR, dB SPL, target labels, and validation dataset choice are set in the YAML config.
+- [`lightning_scripts/losses/paired_loss.py`](lightning_scripts/losses/paired_loss.py) defines the core CE-SSL `Paired_Loss`: an invariant SSL loss across matched views plus an equivariant loss on representation differences. The config parameter `lmda` controls the equivariant weight. The included configs use Barlow Twins losses from [`lightning_scripts/losses/barlow.py`](lightning_scripts/losses/barlow.py), with other SSL losses in [`lightning_scripts/losses/`](lightning_scripts/losses/).
+
+- [`robustness/audio_functions/`](robustness/audio_functions/) contains audio transforms and waveform-to-representation code. [`lightning_scripts/jsinV3DataLoader_precombined_batched.py`](lightning_scripts/jsinV3DataLoader_precombined_batched.py) defines `MatchedSpeechInNoiseDatasetBatched` for four matched speech/noise views and `MatchedAudiosetBatched` for matched AudioSet-only views.
 
 ## Data And Checkpoints
 
