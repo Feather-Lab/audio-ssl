@@ -19,7 +19,6 @@ from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning_classifier import LitWordAudioSetModel
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning_ssl_matched_speech_in_noise import LitAudioSSL as LitAudioSSLMatched
-from lightning_ssl_matched_audioset_only import LitAudioSSL as LitAudioSSLMatchedAudioset
 
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.plugins.environments import SLURMEnvironment
@@ -60,10 +59,8 @@ def cli_main(args):
     classifier = False
     if any(task_str in config_path.stem for task_str in ['ssl', 'barlow', 'mmcr']):
         dataset_name = config['data'].get('dataset')
-        if dataset_name == "MatchedSpeechInNoiseDatasetBatched":
+        if dataset_name in ["MatchedSpeechInNoiseDatasetBatched", "MatchedAudiosetBatched"]:
             module = LitAudioSSLMatched
-        elif dataset_name == "MatchedAudiosetBatched":
-            module = LitAudioSSLMatchedAudioset
         else:
             raise ValueError(f"No supported SSL dataset in {config_path}")
         config['hparas']['batch_size'] = config['hparas']['global_batch_size'] // args.gpus
