@@ -2,7 +2,7 @@
 
 Official repo for the CCN 2026 paper [*Toward Human-aligned Universal Audio Representations with Contrastive-Equivariant Self-Supervised Learning*](https://doi.org/10.32470/uqprhu8).
 
-This repository implements CE-SSL training and evaluation for CochCNN9-style encoders, including linear-probe transfer, zero-shot triplet tasks, parameter decoding, and fMRI analyses reported in the paper.
+This repository implements CE-SSL training and evaluation, including linear-probe transfer, zero-shot triplet tasks, parameter decoding, and fMRI analyses reported in the paper.
 
 ![CE-SSL schematic](fig_1_schematic_alt.png)
 
