@@ -51,10 +51,23 @@ elif [ "$SLURM_ARRAY_TASK_ID" -eq 5 ]; then
         --eval_only --no-lr_scheduler --no-time_avg_rep
 else
     lr=0.01
-    manifest_stem=$(python3 -c 'import pickle, pathlib, sys; config_list_path=sys.argv[1]; array_ix=int(sys.argv[2]); config_list=pickle.load(open(config_list_path, "rb")); print(pathlib.Path(config_list[array_ix]).stem)' "$config_list_path" "$SLURM_ARRAY_TASK_ID")
-    dropout_ckpt_dir="${model_ckpt_dir}/${manifest_stem}/speech_commands_linear_classifier_checkpoints/AdamW_relu4_full_rep_0.0005_cosine_lr_scheduler_"
-    if [ -n "$manifest_stem" ] && [ -d "$dropout_ckpt_dir" ]; then
-        lr=0.0005
+    # Match backup behavior: only use scaled LR if matching classifier ckpts exist.
+    if [ "$SLURM_ARRAY_TASK_ID" -ge 6 ] && [ "$SLURM_ARRAY_TASK_ID" -le 8 ]; then
+        classifier_dir=""
+        if [ "$SLURM_ARRAY_TASK_ID" -eq 6 ]; then
+            classifier_dir="$model_ckpt_dir/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01_audioset_only/speech_commands_linear_classifier_checkpoints/AdamW_relu4_full_rep_0.0005_cosine_lr_scheduler_"
+        elif [ "$SLURM_ARRAY_TASK_ID" -eq 7 ]; then
+            classifier_dir="$model_ckpt_dir/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_0e-01_audioset_only/speech_commands_linear_classifier_checkpoints/AdamW_relu4_full_rep_0.0005_cosine_lr_scheduler_"
+        elif [ "$SLURM_ARRAY_TASK_ID" -eq 8 ]; then
+            classifier_dir="$model_ckpt_dir/kell2018_audioset_unbalanced_supervised/speech_commands_linear_classifier_checkpoints/AdamW_relu4_full_rep_0.0005_cosine_lr_scheduler_"
+        fi
+
+        if [ -n "$classifier_dir" ] && ls "$classifier_dir"/*.ckpt >/dev/null 2>&1; then
+            lr=0.0005
+            echo "Using lr=0.0005 for task ${SLURM_ARRAY_TASK_ID}; found $classifier_dir"
+        else
+            echo "Using lr=0.01 for task ${SLURM_ARRAY_TASK_ID}; missing 0.0005 classifier ckpt dir"
+        fi
     fi
 
     supervised_flag=()

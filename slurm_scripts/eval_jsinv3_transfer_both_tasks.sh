@@ -28,9 +28,8 @@ config_list_path="train_config_manifests/cochdnn9_sup_and_ssl_eval_configs.pkl"
 model_ckpt_dir="model_checkpoints"
 
 lr=0.01
-manifest_stem=$(python3 -c 'import pickle, pathlib, sys; config_list_path=sys.argv[1]; array_ix=int(sys.argv[2]); config_list=pickle.load(open(config_list_path, "rb")); print(pathlib.Path(config_list[array_ix]).stem)' "$config_list_path" "$SLURM_ARRAY_TASK_ID")
-dropout_ckpt_dir="${model_ckpt_dir}/${manifest_stem}/linear_classifier_checkpoints_word_and_speaker_task_relu4_full_rep_AdamW_0.0005_cosine_lr_scheduler__w_dropout"
-if [ -n "$manifest_stem" ] && [ -d "$dropout_ckpt_dir" ]; then
+# Keep LR deterministic: scaled models (manifest ix 6-8) use 0.0005, all others use 0.01.
+if [ "$SLURM_ARRAY_TASK_ID" -ge 6 ] && [ "$SLURM_ARRAY_TASK_ID" -le 8 ]; then
     lr=0.0005
 fi
 

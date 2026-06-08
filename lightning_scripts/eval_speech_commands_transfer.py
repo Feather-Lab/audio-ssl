@@ -5,7 +5,7 @@ import lightning as L
 import yaml
 import sys, os
 import pickle
-from lightning_ssl_matched_speech_in_noise import LitAudioSSL
+from lightning_ssl import LitAudioSSL
 from lightning_classifier_matched_speech_in_noise import LitWordAudioSetModel as LitWordAudioSetModelMatched
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
@@ -13,7 +13,7 @@ from pytorch_lightning.loggers import WandbLogger
 import robustness.audio_functions.audio_transforms as at 
 from datasets import load_dataset
 
-from optimizers import LARS, CosineWarmupScheduler
+from audio_ssl.misc import LARS, CosineWarmupScheduler
 from torchmetrics.classification import Accuracy
 import pathlib
 from torchaudio.functional import resample
@@ -748,13 +748,13 @@ def cli_main(args):
 
     if len(classifier_ckpts) > 0 and args.classifier_ckpt_path == '':
         classifier_ckpt_path = sorted(classifier_ckpts, key=os.path.getctime)[-1]
-        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=False) # get latest checkpoint 
         module.load_state_dict(classifier_ckpt['state_dict'])
         print(f"Loaded classifier from {classifier_ckpt_path}")
     
     if args.classifier_ckpt_path != '':
         classifier_ckpt_path = args.classifier_ckpt_path
-        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=True) # get latest checkpoint 
+        classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=False) # get latest checkpoint 
         module.load_state_dict(classifier_ckpt['state_dict'])
         print(f"Loaded classifier from {classifier_ckpt_path}")
         

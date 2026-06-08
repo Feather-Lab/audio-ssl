@@ -18,6 +18,7 @@ mamba activate cochdnn_ssl_pl
 
 PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/mnt/ceph/users/igriffith/projects/cochdnn}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+export COCHDNN_NSYNTH_DIR="${COCHDNN_NSYNTH_DIR:-/mnt/ceph/users/igriffith/datasets/nsynth}"
 cd "${PROJECT_ROOT}"
 master_node=$SLURMD_NODENAME
 
