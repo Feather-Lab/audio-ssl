@@ -9,13 +9,13 @@
 #SBATCH --time=5:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-7 # Whisper encoder stages: input, conv1, conv2, blocks, ln_post, final # # 3,7,11,13,15,18 for just kell acts; 3,5-9 for ResNet
+#SBATCH --array=0-11
 
-# module load cuda cudnn nccl
+module load cuda cudnn nccl
 
 mamba activate cochdnn_ssl_pl
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/mnt/home/igriffith/ceph/projects/cochdnn}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 cd "${PROJECT_ROOT}"
 master_node=$SLURMD_NODENAME
@@ -25,18 +25,8 @@ echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_D
 
 
 
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/whisper_tiny_barlow_equivariant_lmbda_1e-2_lr_2e-2_eq_lmbda_5e-01.yaml \
-#                                    -D "${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn}" -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
-#                                    -D "${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn}" -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --model_ckpt_dir model_checkpoints \
-
-python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
-                                   -D "${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn}" -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-                                   --model_ckpt_dir model_checkpoints \
-
-# python3 lightning_scripts/make_esc_pl_model_plots.py --config_path model_configs/kell2018_barlow_invariant_lmbda_1e-2_lr_2e-1_jsin_audioset.yaml \
-#                                    -D "${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn}" -L $SLURM_ARRAY_TASK_ID -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
-#                                    --ckpt_path model_checkpoints/kell2018_barlow_invariant_lmbda_1e-2_lr_2e-1_jsin_audioset/checkpoints/epoch=30-step=5580-best_val.ckpt \
+python3 lightning_scripts/make_esc_pl_model_plots.py \
+                                   --config_list_path train_config_manifests/cochdnn9_sup_and_ssl_eval_configs.pkl \
+                                   --array_ix $SLURM_ARRAY_TASK_ID \
+                                   -D "${COCHDNN_SCRATCH_DIR:-/tmp/cochdnn}" -L 15 -A 4096 -R 5 -P -O -C 0.01 0.1 1 10 100 \
+                                   --model_ckpt_dir model_checkpoints

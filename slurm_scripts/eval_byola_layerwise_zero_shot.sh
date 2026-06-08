@@ -1,15 +1,15 @@
 #!/bin/bash -l
-#SBATCH --job-name=cochdnn_zeroshot
-#SBATCH --output=outLogs/cochdnn_zeroshot_%A_%a.out
-#SBATCH --error=outLogs/cochdnn_zeroshot_%A_%a.err
+#SBATCH --job-name=byola_zeroshot
+#SBATCH --output=outLogs/byola_zeroshot_%A_%a.out
+#SBATCH --error=outLogs/byola_zeroshot_%A_%a.err
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem=32Gb
-#SBATCH --time=02:00:00 # should take about 20 minutes, extra for overhead
+#SBATCH --time=02:00:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
-#SBATCH --array=0-35
+#SBATCH --array=0-2
 
 module load cuda cudnn nccl
 
@@ -22,5 +22,5 @@ cd "${PROJECT_ROOT}"
 echo "Job array ID: $SLURM_ARRAY_TASK_ID"
 
 python3 lightning_scripts/eval_layerwise_zero_shot.py \
-    --model_type cochdnn \
+    --model_type byola \
     --out_dir results_dfs

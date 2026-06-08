@@ -228,8 +228,18 @@ def cli_main(args):
         if args.ckpt_path == "":
             ckpt_paths = sorted(checkpoint_dir.glob("*.ckpt"), key=os.path.getctime)
             if len(ckpt_paths) > 0:
-                ckpt_path = ckpt_paths[-1]  # get latest checkpoint
-                print(ckpt_path)
+                # Prefer best validation/training checkpoints when available.
+                # Falling back to newest can silently select a non-best checkpoint.
+                best_ckpt_paths = [
+                    p for p in ckpt_paths
+                    if ('best_val' in p.name) or ('best_train' in p.name)
+                ]
+                if len(best_ckpt_paths) > 0:
+                    ckpt_path = sorted(best_ckpt_paths, key=os.path.getctime)[-1]
+                    print(f"Using best checkpoint: {ckpt_path}")
+                else:
+                    ckpt_path = ckpt_paths[-1]  # fallback: latest checkpoint
+                    print(f"Using latest checkpoint (no best_* found): {ckpt_path}")
             ckpt_modifier = ''
         else:
             ckpt_path = args.ckpt_path
@@ -282,6 +292,12 @@ def cli_main(args):
         classifier_ckpt = torch.load(classifier_ckpt_path, weights_only=False)
         module.load_state_dict(classifier_ckpt['state_dict'])
         print(f"Loaded classifier from {classifier_ckpt_path}")
+
+    if args.eval_only and args.use_classifier_ckpt and len(classifier_ckpts) == 0 and args.classifier_ckpt_path == '':
+        raise FileNotFoundError(
+            "eval_only + use_classifier_ckpt was set, but no classifier checkpoint was found at "
+            f"{classifier_checkpoint_dir}. This would evaluate an untrained classifier."
+        )
     
     if args.classifier_ckpt_path != '':
         classifier_ckpt_path = str(args.classifier_ckpt_path)

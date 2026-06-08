@@ -6,7 +6,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem=64Gb
-#SBATCH --time=1-01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --partition=gpu
 #SBATCH -N 1
 #SBATCH --constraint=a100-80gb
@@ -16,7 +16,7 @@ module load cuda cudnn nccl
 
 mamba activate cochdnn_ssl_pl
 
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-/mnt/ceph/users/igriffith/projects/cochdnn}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 cd "${PROJECT_ROOT}"
 master_node=$SLURMD_NODENAME
@@ -24,10 +24,11 @@ master_node=$SLURMD_NODENAME
 num_gpus=$(( $(echo $CUDA_VISIBLE_DEVICES | tr -cd , | wc -c) + 1))
 echo "Master: "$master_node" Local node: "$HOSTNAME" GPUs used: "$CUDA_VISIBLE_DEVICES" Total GPUs on that node: "$num_gpus" CPUs per node: "$SLURM_JOB_CPUS_PER_NODE
 
-# Example: NSynth instrument family classification with kell2018
-    # --config_path model_configs/supervised_models/word_kell2018_MatchedDataset_LARS.yaml \
-    # --config_path msodel_configs/supervised_models/kell2018_audioset_unbalanced_supervised.yaml \
-    # --supervised_backbone \
+supervised_flag=()
+if [ "$SLURM_ARRAY_TASK_ID" -ge 8 ]; then
+    supervised_flag=(--supervised_backbone)
+fi
+
 srun python3 lightning_scripts/eval_nsynth_linear.py \
     --config_list_path train_config_manifests/cochdnn9_sup_and_ssl_eval_configs.pkl \
     --array_ix $SLURM_ARRAY_TASK_ID \
@@ -41,9 +42,10 @@ srun python3 lightning_scripts/eval_nsynth_linear.py \
     --task 'family' \
     --train_epochs 10 \
     --duration 2.0 \
+    "${supervised_flag[@]}" \
     --no-time_avg_rep \
     --no-lr_scheduler \
-    --no-eval_only \
-    --no-use_classifier_ckpt  \
+    --eval_only \
+    --use_classifier_ckpt  \
     --with_dropout 
 

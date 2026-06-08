@@ -161,44 +161,54 @@ def set_bar_labels(axs,
                    inside_fit_tolerance=0.02,
                    fontsize=12,
                    sem_vals=None,
+                   y_cut_for_olap=None,
+                   x_shift_size=0.0,
     ):
 
     fig = axs.get_figure()
-    if fig.canvas is not None:
-        fig.canvas.draw()
-        renderer = fig.canvas.get_renderer()
-    else:
-        renderer = None
+    if y_cut_for_olap is None:
+        if fig.canvas is not None:
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+        else:
+            renderer = None
 
     for ix, bar in enumerate(bars):
         bar_height = bar.get_height()
-        bar_interior = bar_height - ymin_bars
-
         bar_name = plot_names[ix].replace('supervised', 'sup.')
-        if renderer is not None:
-            # Measure rendered, rotated text height directly in data units.
-            tmp_txt = axs.text(0, 0, bar_name, rotation=90, fontsize=fontsize, alpha=0)
-            bbox = tmp_txt.get_window_extent(renderer=renderer)
-            tmp_txt.remove()
-            y0 = axs.transData.inverted().transform((0, 0))[1]
-            y1 = axs.transData.inverted().transform((0, bbox.height))[1]
-            label_height_data = y1 - y0
-        else:
-            # Fallback if renderer is unavailable.
-            label_height_data = len(bar_name) * 0.01
 
-        # Allow tolerance so borderline labels stay inside bars.
-        if label_height_data <= (bar_interior + inside_fit_tolerance):
-            y = ymin_bars
+        if y_cut_for_olap is not None:
+            if bar_height > y_cut_for_olap:
+                y = ymin_bars
+            else:
+                y = bar_height + no_olap_pad
             text_color = "k"
             if white_text_substrs and any(sub_str in bar_name for sub_str in white_text_substrs):
                 text_color = "white"
+            x = x_shift_size + (bar.get_x() + bar.get_width() / 2.)
         else:
-            top = bar_height + (sem_vals[ix] if sem_vals is not None else 0.0)
-            y = top + no_olap_pad
-            text_color = "k"
+            bar_interior = bar_height - ymin_bars
+            if renderer is not None:
+                tmp_txt = axs.text(0, 0, bar_name, rotation=90, fontsize=fontsize, alpha=0)
+                bbox = tmp_txt.get_window_extent(renderer=renderer)
+                tmp_txt.remove()
+                y0 = axs.transData.inverted().transform((0, 0))[1]
+                y1 = axs.transData.inverted().transform((0, bbox.height))[1]
+                label_height_data = y1 - y0
+            else:
+                label_height_data = len(bar_name) * 0.01
 
-        x = (bar.get_x() + bar.get_width() / 2.)  # compensate rotation pivot
+            if label_height_data <= (bar_interior + inside_fit_tolerance):
+                y = ymin_bars
+                text_color = "k"
+                if white_text_substrs and any(sub_str in bar_name for sub_str in white_text_substrs):
+                    text_color = "white"
+            else:
+                top = bar_height + (sem_vals[ix] if sem_vals is not None else 0.0)
+                y = top + no_olap_pad
+                text_color = "k"
+            x = bar.get_x() + bar.get_width() / 2.
+
         axs.text(
             x,
             y,
@@ -1294,24 +1304,51 @@ def simple_bar_plot(ax, data, value_col, error_col, title, ylabel, hue_dict, bar
     # Group by model and get means
     means = data.groupby('model_name')[value_col].mean()
     errors = data.groupby('model_name')[error_col].mean() if error_col else None
-    
-    # Sort by lambda value
-    data = data.sort_values('eq_lmbda').copy()
-    lambda_vals = data['eq_lmbda'].unique()
-    models = data.model_name.unique()
-    
+
+    # Sort model order by lambda value so bars/labels/colors stay aligned.
+    # Prefer lambda from model_name (canonical after normalization), then eq_lmbda.
+    model_meta = (
+        data.groupby('model_name', as_index=False)['eq_lmbda']
+        .first()
+        .rename(columns={'eq_lmbda': 'eq_lmbda_first'})
+    )
+
+    def _lambda_from_row(row):
+        name_match = re.search(r'λ=([-\d.]+)', row['model_name'])
+        if name_match:
+            try:
+                return float(name_match.group(1))
+            except ValueError:
+                pass
+        eq_val = row['eq_lmbda_first']
+        if pd.notna(eq_val) and str(eq_val) != '':
+            try:
+                return float(eq_val)
+            except ValueError:
+                return np.inf
+        return np.inf
+
+    model_meta['lambda_sort'] = model_meta.apply(_lambda_from_row, axis=1)
+    model_meta = model_meta.sort_values(['lambda_sort', 'model_name'])
+    models = model_meta['model_name'].tolist()
+
     # Create x positions
-    x = np.arange(len(models))  
-    
+    x = np.arange(len(models))
+
     # Get colors and labels (just the number, no "λ=")
     colors = [hue_dict.get(model, '#444444') for model in models]
     labels = [re.search(r'λ=([0-9.]+)', m).group(1) if 'λ=' in m else m for m in models]
-    
+
+    # Reindex means/errors to match model order
+    ordered_means = means.reindex(models)
+    ordered_errors = errors.reindex(models) if errors is not None else None
+
     # Plot bars
-    bars = ax.bar(x, means, width=bar_width, color=colors, edgecolor='black', linewidth=0.5)
-    
+    bars = ax.bar(x, ordered_means, width=bar_width, color=colors, edgecolor='black', linewidth=0.5)
+
     # Add error bars if available
-    ax.errorbar(x, means, yerr=errors, fmt='none', color='black', capsize=0, linewidth=1)
+    if ordered_errors is not None:
+        ax.errorbar(x, ordered_means, yerr=ordered_errors, fmt='none', color='black', capsize=0, linewidth=1)
     
     # Set labels (no rotation)
     ax.set_xticks(x)

@@ -37,6 +37,26 @@ COCHDNN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "supervised": False,
         "display_name": "CochCNN9 ssl λ=0.0",
     },
+    "ssl_0.1": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_1e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.1",
+    },
+    "ssl_0.2": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_2e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.2",
+    },
+    "ssl_0.3": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_3e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.3",
+    },
+    "ssl_0.4": {
+        "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_4e-01.yaml",
+        "supervised": False,
+        "display_name": "CochCNN9 ssl λ=0.4",
+    },
     "ssl_0.5": {
         "config": "model_configs/kell2018_barlow_equivariant_lmbda_1e-2_lr_2e-1_eq_lmbda_5e-01.yaml",
         "supervised": False,

@@ -54,6 +54,7 @@ WHISPER_SR = 16_000
 WHISPER_MODELS = {"tiny": "tiny", "medium": "medium", "large-v3": "large-v3"}
 
 AUDIOMAE_SR = 16_000
+BYOLA_SR = 16_000
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +248,23 @@ def build_encoder(model_type: str, model_key: str, device: torch.device):
         encoder = AudioMAELayerwiseEncoder(time_pool=True).to(device)
         return encoder, "AudioMAE", AUDIOMAE_SR, f"{encoder.n_blocks} ViT blocks"
 
+    if model_type == "byola":
+        import yaml
+        from lightning_scripts.byola_lightning_module import BYOLAModule
+
+        with open(PROJECT_ROOT / "byol-a" / "config.yaml", "r") as f:
+            byola_config = yaml.load(f, Loader=yaml.FullLoader)
+        byola_config["classifier_layer"] = "features.10"
+        model = BYOLAModule(byola_config).to(device).eval()
+
+        @torch.no_grad()
+        def encoder(waveform: torch.Tensor) -> Dict[str, torch.Tensor]:
+            if waveform.ndim == 3 and waveform.shape[1] == 1:
+                waveform = waveform.squeeze(1)
+            return {"features_10": model(waveform).flatten(start_dim=1)}
+
+        return encoder, "byol-a", BYOLA_SR, "BYOL-A features.10"
+
     raise ValueError(f"Unknown model_type: {model_type!r}")
 
 
@@ -261,6 +279,8 @@ def _model_keys_for_type(model_type: str) -> List[str]:
         return list(WHISPER_MODELS.keys())
     if model_type == "audiomae":
         return ["audiomae"]
+    if model_type == "byola":
+        return ["byola"]
     raise ValueError(f"Unknown model_type: {model_type!r}")
 
 
@@ -311,7 +331,7 @@ def main():
     parser.add_argument(
         "--model_type",
         required=True,
-        choices=["cochdnn", "whisper", "audiomae"],
+        choices=["cochdnn", "whisper", "audiomae", "byola"],
         help="Model family to evaluate",
     )
     parser.add_argument(

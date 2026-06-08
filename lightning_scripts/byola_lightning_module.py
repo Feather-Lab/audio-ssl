@@ -91,6 +91,8 @@ class BYOLAModule(L.LightningModule):
 
     def forward(self, x):
         with torch.no_grad():
+            if x.ndim == 3 and x.shape[1] == 1:
+                x = x.squeeze(1)
             # Convert audio to mel spectrogram: (batch, time) -> (batch, mel, time)
             mel = self.to_melspec(x)
             # Normalize: (batch, mel, time)
