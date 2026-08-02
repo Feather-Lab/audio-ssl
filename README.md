@@ -47,3 +47,18 @@ Datasets and checkpoints are available upon request. Once obtained, set paths wi
 Transfer, zero-shot, parameter-decoding, and fMRI analysis entry points are in `lightning_scripts/` and `fmri_analysis/`. Start with the demo notebooks in `notebooks/demo_notebooks/`: `audio_transforms_demo.ipynb` shows the matched CE-SSL audio transforms, and `zero_shot_eval_demo.ipynb` runs the NSynth melody-match triplet evaluation path.
 
 Paper figure notebooks are under `notebooks/`, including `figure_2.ipynb`, `figure_3_parameter_decoding.ipynb`, `figure_3_zero_shot.ipynb`, and `figure_4_plot_fmri_components.ipynb`. These notebooks expect generated evaluation outputs such as `eval_jsin_results/`, `eval_nsynth_results/`, and `parameter_decoding_v2/`.
+
+## Citation
+
+This repository was released with the following proceedings paper. If you use this repository in your research, please cite as:
+
+```bibtex
+@inproceedings{griffith2026humanaligned,
+  title={Human-aligned Universal Audio Representations with Contrastive-Equivariant Self-Supervised Learning},
+  author={Ian M. Griffith and Thomas Edward Yerxa and Josh McDermott and Jenelle Feather},
+  booktitle={9th Annual Conference on Cognitive Computational Neuroscience},
+  year={2026},
+  doi={10.32470/uqprhu8},
+  url={https://openreview.net/forum?id=qaNtSV4PGm}
+}
+```
